@@ -1,5 +1,7 @@
 mod nk2;
 
+use midi_control::MidiMessage;
+use midi_control::SysExEvent;
 use std::thread;
 use std::time;
 
@@ -73,7 +75,8 @@ fn create_output_connection() -> Result<midir::MidiOutputConnection, ConnectionE
 fn main() {
     let midi_in = create_input_connection(
         move |stamp, message, _| {
-            println!("{}: {:?} (len = {})", stamp, message, message.len());
+            let msg = MidiMessage::from(message);
+            println!("[IN]  {}: {:?}", stamp, msg);
         },
         (),
     )
@@ -81,16 +84,16 @@ fn main() {
     let mut midi_out = create_output_connection().unwrap();
 
     loop {
-        use midi_control::MidiMessage;
-        use midi_control::SysExEvent;
-
         let msg = MidiMessage::SysEx(SysExEvent::new_non_realtime(
             midi_control::consts::usysex::ALL_CALL,
             [0x06, 0x01],
             &[0xf7],
         ));
         let raw: Vec<u8> = msg.into();
-        dbg!(midi_out.send(raw.as_slice()));
+        match midi_out.send(raw.as_slice()) {
+            Ok(_) => println!("[OUT] sent!"),
+            Err(err) => println!("[OUT] error: {err:?}"),
+        }
 
         const WAIT_DURATION: time::Duration = time::Duration::from_millis(100);
         thread::sleep(WAIT_DURATION);
