@@ -1,4 +1,3 @@
-use std::sync::mpsc::channel;
 use std::thread;
 use std::time;
 
