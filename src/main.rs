@@ -1,3 +1,5 @@
+mod nk2;
+
 use std::thread;
 use std::time;
 
