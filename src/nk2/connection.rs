@@ -13,7 +13,7 @@ const NANOKEY2_OUTPUT_NAME: &str = "nanoKEY2";
 const NANOKEY2_OUTPUT_NAME_2: &str = "nanoKEY2 _ CTRL";
 
 #[derive(Error, Debug)]
-enum ConnectionError {
+pub enum ConnectionError {
     #[error("failed to initialize midi: {0}")]
     InitMIDI(String),
     #[error("failed to find nanokey2 port")]
@@ -22,7 +22,7 @@ enum ConnectionError {
     Failed(String),
 }
 
-fn create_input_connection<F, T: Send>(
+pub fn create_input_connection<F, T: Send>(
     callback: F,
     data: T,
 ) -> Result<MidiInputConnection<T>, ConnectionError>
@@ -47,7 +47,7 @@ where
         .map_err(|err| ConnectionError::Failed(err.to_string()))
 }
 
-fn create_output_connection() -> Result<midir::MidiOutputConnection, ConnectionError> {
+pub fn create_output_connection() -> Result<midir::MidiOutputConnection, ConnectionError> {
     let output = MidiOutput::new("midir output")
         .map_err(|err| ConnectionError::InitMIDI(err.to_string()))?;
 
