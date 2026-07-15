@@ -112,4 +112,34 @@ mod tests {
         //     println!("Closing connection");
         // }
     }
+
+    #[test]
+    #[ignore = "needs keyboard connection"]
+    fn test_02() {
+        let _midi_in = create_input_connection(
+            move |stamp, message, _| {
+                let msg = MidiMessage::from(message);
+                println!("[IN]  {}: {:?}", stamp, msg);
+            },
+            (),
+        )
+        .unwrap();
+        let mut midi_out = create_output_connection().unwrap();
+
+        loop {
+            let msg = MidiMessage::SysEx(SysExEvent::new_manufacturer(
+                midi_control::sysex::ManufacturerId::Id(0x42),
+                // Scene Data Dump Request
+                &[0x40, 0x00, 0x01, 0x11, 0x01, 0x1F, 0x10, 0x00, 0xF7],
+            ));
+            let raw: Vec<u8> = msg.into();
+            match midi_out.send(raw.as_slice()) {
+                Ok(_) => println!("[OUT] sent!"),
+                Err(err) => println!("[OUT] error: {err:?}"),
+            }
+
+            const WAIT_DURATION: time::Duration = time::Duration::from_millis(1000);
+            thread::sleep(WAIT_DURATION);
+        }
+    }
 }

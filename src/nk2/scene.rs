@@ -3,7 +3,7 @@ use thiserror::Error;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
-enum Speed {
+pub enum Speed {
     Immediate = 0,
     Fast = 1,
     Normal = 2,
@@ -12,7 +12,7 @@ enum Speed {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
-enum VelocityCurve {
+pub enum VelocityCurve {
     Light = 0,
     Normal = 1,
     Heavy = 2,
@@ -21,39 +21,39 @@ enum VelocityCurve {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
-enum ButtonBehaviour {
+pub enum ButtonBehaviour {
     Momentary = 0,
     Toggle = 1,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Scene {
+pub struct Scene {
     /// 0..=15
-    midi_channel: u8,
-    pitch_bend_speed: Speed,
+    pub midi_channel: u8,
+    pub pitch_bend_speed: Speed,
     /// 64 +/- 12 => -12..12
-    transpose: u8,
-    velocity_curve: VelocityCurve,
+    pub transpose: u8,
+    pub velocity_curve: VelocityCurve,
     /// 1..=127
-    velocity_constant_value: u8,
-    mod_enable: bool,
+    pub velocity_constant_value: u8,
+    pub mod_enable: bool,
     /// 0..=127
-    mod_cc: u8,
-    mod_behaviour: ButtonBehaviour,
+    pub mod_cc: u8,
+    pub mod_behaviour: ButtonBehaviour,
     /// 0..=127
-    mod_off_value: u8,
+    pub mod_off_value: u8,
     /// 0..=127
-    mod_on_value: u8,
-    mod_speed: Speed,
-    sustain_enable: bool,
+    pub mod_on_value: u8,
+    pub mod_speed: Speed,
+    pub sustain_enable: bool,
     /// 0..=127
-    sustain_cc: u8,
-    sustain_behaviour: ButtonBehaviour,
+    pub sustain_cc: u8,
+    pub sustain_behaviour: ButtonBehaviour,
     /// 0..=127
-    sustain_off_value: u8,
+    pub sustain_off_value: u8,
     /// 0..=127
-    sustain_on_value: u8,
-    sustain_speed: Speed,
+    pub sustain_on_value: u8,
+    pub sustain_speed: Speed,
 }
 
 impl Default for Scene {
@@ -82,7 +82,7 @@ impl Default for Scene {
 
 #[derive(Error, Debug)]
 #[error("invalid scene value for {name}: {value}")]
-struct InvalidSceneParam {
+pub struct InvalidSceneParam {
     name: &'static str,
     value: u8,
 }
