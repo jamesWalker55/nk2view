@@ -24,24 +24,24 @@ const PING_DURATION: Duration = Duration::from_millis(200);
 #[derive(Debug, Clone)]
 pub enum SimpleEvent {
     // messages from keyboard
-    NoteOn(u8, u8),
-    NoteOff(u8, u8),
-    AllNotesOff(u8),
-    SceneUpdated(u8, Scene),
+    NoteOn(u8),
+    NoteOff(u8),
+    AllNotesOff,
+    SceneUpdated(Scene),
     Ack(msg::Ack),
     // messages from establishing connection with keyboard
-    ConnectionEstablished(u8, Scene),
+    ConnectionEstablished(Scene),
     ConnectionError(String),
 }
 
 impl SimpleEvent {
     fn from_midi_message(msg: &MidiMessage) -> Option<Self> {
         match msg {
-            MidiMessage::NoteOn(ch, evt) => Some(SimpleEvent::NoteOn(*ch as u8, evt.key)),
-            MidiMessage::NoteOff(ch, evt) => Some(SimpleEvent::NoteOff(*ch as u8, evt.key)),
+            MidiMessage::NoteOn(ch, evt) => Some(SimpleEvent::NoteOn(evt.key)),
+            MidiMessage::NoteOff(ch, evt) => Some(SimpleEvent::NoteOff(evt.key)),
             MidiMessage::ControlChange(ch, evt) => {
                 if evt.control == 120 || evt.control == 123 {
-                    Some(SimpleEvent::AllNotesOff(*ch as u8))
+                    Some(SimpleEvent::AllNotesOff)
                 } else {
                     None
                 }
@@ -50,7 +50,7 @@ impl SimpleEvent {
                 if let Ok(evt) = msg::Ack::parse_sysex(&evt) {
                     Some(SimpleEvent::Ack(evt))
                 } else if let Ok(evt) = msg::SceneDump::parse_sysex(&evt) {
-                    Some(SimpleEvent::SceneUpdated(evt.0, evt.1))
+                    Some(SimpleEvent::SceneUpdated(evt.1))
                 } else {
                     // TODO: handle more sysex events
                     None
@@ -63,35 +63,35 @@ impl SimpleEvent {
 }
 
 pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
-    let (tx, mut rx) = mpsc::unbounded::<SimpleEvent>();
+    // channel for communicating with main thread
+    let (simple_tx, mut simple_rx) = mpsc::unbounded::<SimpleEvent>();
 
     std::thread::spawn(move || {
         smol::block_on(async {
             // connection restart loop, break this loop to stop the thread
             'outer: loop {
+                // channel for forwarding events from MIDI worker to this thread
+                let (midi_tx, mut midi_rx) = mpsc::unbounded::<MidiMessage>();
                 let should_exit = Arc::new(AtomicBool::new(false));
 
-                // create MIDI input
+                // create MIDI input, forwarding events into this scope
                 // keep `_midi_in` alive to keep connection alive
                 let _midi_in = match create_input_connection(
                     move |stamp, message, (tx, should_exit)| {
                         let msg = MidiMessage::from(message);
-                        if let Some(evt) = SimpleEvent::from_midi_message(&msg) {
-                            if let Err(err) = tx.unbounded_send(evt) {
-                                // if failed to send, `rx` has been dropped
-                                // rx is dropped, the program must have quit
-                                let _ =
-                                    should_exit.store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
+                        if let Err(err) = tx.unbounded_send(msg) {
+                            // if failed to send, `rx` has been dropped
+                            // rx is dropped, the program must have quit
+                            let _ = should_exit.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
                     },
-                    (tx.clone(), should_exit.clone()),
+                    (midi_tx.clone(), should_exit.clone()),
                 ) {
                     Ok(x) => x,
                     Err(err) => {
                         // emit error event to channel
                         let evt = SimpleEvent::ConnectionError(err.to_string());
-                        if let Err(_) = tx.unbounded_send(evt) {
+                        if let Err(_) = simple_tx.unbounded_send(evt) {
                             // if failed to emit error, `rx` has been dropped
                             break 'outer;
                         }
@@ -108,7 +108,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                     Err(err) => {
                         // emit error event to channel
                         let evt = SimpleEvent::ConnectionError(err.to_string());
-                        if let Err(_) = tx.unbounded_send(evt) {
+                        if let Err(_) = simple_tx.unbounded_send(evt) {
                             // if failed to emit error, `rx` has been dropped
                             break 'outer;
                         }
@@ -120,7 +120,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                 };
 
                 // determine what channel the keyboard is on
-                let (channel, scene) = {
+                let dump = {
                     // request keyboard to dump scene on every channel
                     for i in 0u8..=15u8 {
                         let data: Vec<u8> = msg::dump_scene_request(i).into();
@@ -130,7 +130,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                         if let Err(err) = res {
                             // emit error event to channel
                             let evt = SimpleEvent::ConnectionError(err.to_string());
-                            if let Err(_) = tx.unbounded_send(evt) {
+                            if let Err(_) = simple_tx.unbounded_send(evt) {
                                 // if failed to emit error, `rx` has been dropped
                                 break 'outer;
                             }
@@ -149,9 +149,15 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
 
                     // wait for the first scene update message
                     let fetch_task = async {
-                        while let Ok(msg) = rx.recv().await {
-                            if let SimpleEvent::SceneUpdated(ch, scene) = msg {
-                                return Ok((ch, scene));
+                        while let Ok(MidiMessage::SysEx(sysex)) = midi_rx.recv().await {
+                            match msg::SceneDump::parse_sysex(&sysex) {
+                                Ok(dump) => {
+                                    return Ok(dump);
+                                }
+                                Err(err) => {
+                                    // TODO: log error
+                                    continue;
+                                }
                             }
                         }
 
@@ -163,7 +169,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                         Err(err) => {
                             // emit error event to channel
                             let evt = SimpleEvent::ConnectionError(err.to_string());
-                            if let Err(_) = tx.unbounded_send(evt) {
+                            if let Err(_) = simple_tx.unbounded_send(evt) {
                                 // if failed to emit error, `rx` has been dropped
                                 break 'outer;
                             }
@@ -177,8 +183,8 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
 
                 // emit success signal
                 {
-                    let evt = SimpleEvent::ConnectionEstablished(channel, scene);
-                    if let Err(_) = tx.unbounded_send(evt) {
+                    let evt = SimpleEvent::ConnectionEstablished(dump.1);
+                    if let Err(_) = simple_tx.unbounded_send(evt) {
                         // if failed to emit error, `rx` has been dropped
                         break 'outer;
                     }
@@ -196,11 +202,11 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                     }
 
                     // send regular "scene request" ping
-                    let req: Vec<u8> = msg::dump_scene_request(channel).into();
+                    let req: Vec<u8> = msg::dump_scene_request(dump.0).into();
                     if let Err(err) = midi_out.send(&req) {
                         // emit error event to channel
                         let evt = SimpleEvent::ConnectionError(err.to_string());
-                        if let Err(_) = tx.unbounded_send(evt) {
+                        if let Err(_) = simple_tx.unbounded_send(evt) {
                             // if failed to emit error, `rx` has been dropped
                             break 'outer;
                         }
@@ -214,5 +220,5 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
         });
     });
 
-    rx
+    simple_rx
 }
