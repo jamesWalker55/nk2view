@@ -82,7 +82,7 @@ pub fn load_scene_request(ch: u8, scene: &Scene) -> MidiMessage {
 pub struct SceneDump(pub u8, pub Scene);
 
 #[derive(Error, Debug)]
-enum ParseSceneDumpError {
+pub enum ParseSceneDumpError {
     #[error("not a scene dump event")]
     NotDump,
     #[error("scene dump event is malformed")]
@@ -178,7 +178,7 @@ pub enum Ack {
 }
 
 #[derive(Error, Debug)]
-enum ParseAckError {
+pub enum ParseAckError {
     #[error("not an ack event")]
     NotAck,
     #[error("ack event is malformed")]
