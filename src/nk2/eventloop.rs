@@ -211,3 +211,15 @@ async fn run_session(simple_tx: &UnboundedSender<SimpleEvent>) -> Result<(), Ses
         }
     }
 }
+
+#[cfg(test)]
+#[test]
+#[ignore = "needs keyboard, runs forever"]
+fn test_session() {
+    smol::block_on(async {
+        let mut events = spawn_event_thread();
+        while let Ok(evt) = events.recv().await {
+            println!("{evt:?}");
+        }
+    });
+}
