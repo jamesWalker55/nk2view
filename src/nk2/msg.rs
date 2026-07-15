@@ -79,7 +79,7 @@ pub fn load_scene_request(ch: u8, scene: &Scene) -> MidiMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SceneDump(u8, Scene);
+pub struct SceneDump(pub u8, pub Scene);
 
 #[derive(Error, Debug)]
 enum ParseSceneDumpError {
@@ -126,6 +126,47 @@ impl SceneDump {
 
         Ok(SceneDump(channel, scene))
     }
+}
+
+#[cfg(test)]
+#[test]
+fn test_scene_dump() {
+    use crate::nk2::scene::{ButtonBehaviour, Speed, VelocityCurve};
+
+    let evt = SysExEvent {
+        r#type: SysExType::Manufacturer(ManufacturerId::Id(66)),
+        data: vec![
+            64, 0, 1, 17, 1, 127, 75, 64, 122, 0, 127, 2, 127, 127, 127, 127, 113, 127, 66, 1, 100,
+            127, 127, 127, 3, 127, 127, 1, 1, 0, 0, 127, 6, 2, 127, 127, 1, 64, 0, 0, 124, 127, 2,
+            127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
+            127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
+            127, 127, 127, 1, 127, 247,
+        ],
+    };
+    let msg = SceneDump::parse_sysex(&evt).unwrap();
+    let expected = SceneDump(
+        0,
+        Scene {
+            midi_channel: 0,
+            pitch_bend_speed: Speed::Normal,
+            transpose: 66,
+            velocity_curve: VelocityCurve::Normal,
+            velocity_constant_value: 100,
+            mod_enable: true,
+            mod_cc: 1,
+            mod_behaviour: ButtonBehaviour::Momentary,
+            mod_off_value: 0,
+            mod_on_value: 127,
+            mod_speed: Speed::Normal,
+            sustain_enable: true,
+            sustain_cc: 64,
+            sustain_behaviour: ButtonBehaviour::Momentary,
+            sustain_off_value: 0,
+            sustain_on_value: 127,
+            sustain_speed: Speed::Normal,
+        },
+    );
+    assert_eq!(msg, expected);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,50 +225,5 @@ impl Ack {
             // TODO: unknown command type
             x => Err(ParseAckError::Unknown(x)),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::nk2::scene::{ButtonBehaviour, Speed, VelocityCurve};
-
-    use super::*;
-
-    #[test]
-    fn test_01() {
-        let evt = SysExEvent {
-            r#type: SysExType::Manufacturer(ManufacturerId::Id(66)),
-            data: vec![
-                64, 0, 1, 17, 1, 127, 75, 64, 122, 0, 127, 2, 127, 127, 127, 127, 113, 127, 66, 1,
-                100, 127, 127, 127, 3, 127, 127, 1, 1, 0, 0, 127, 6, 2, 127, 127, 1, 64, 0, 0, 124,
-                127, 2, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
-                127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
-                127, 127, 127, 127, 127, 127, 1, 127, 247,
-            ],
-        };
-        let msg = SceneDump::parse_sysex(&evt).unwrap();
-        let expected = SceneDump(
-            0,
-            Scene {
-                midi_channel: 0,
-                pitch_bend_speed: Speed::Normal,
-                transpose: 66,
-                velocity_curve: VelocityCurve::Normal,
-                velocity_constant_value: 100,
-                mod_enable: true,
-                mod_cc: 1,
-                mod_behaviour: ButtonBehaviour::Momentary,
-                mod_off_value: 0,
-                mod_on_value: 127,
-                mod_speed: Speed::Normal,
-                sustain_enable: true,
-                sustain_cc: 64,
-                sustain_behaviour: ButtonBehaviour::Momentary,
-                sustain_off_value: 0,
-                sustain_on_value: 127,
-                sustain_speed: Speed::Normal,
-            },
-        );
-        assert_eq!(msg, expected);
     }
 }
