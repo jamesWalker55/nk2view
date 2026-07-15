@@ -4,7 +4,10 @@ use std::{
     time::Duration,
 };
 
-use iced::futures::channel::mpsc::{self, UnboundedReceiver};
+use iced::futures::{
+    FutureExt,
+    channel::mpsc::{self, UnboundedReceiver},
+};
 use midi_control::MidiMessage;
 use smol::future::FutureExt as _;
 
@@ -72,26 +75,25 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
             'outer: loop {
                 // channel for forwarding events from MIDI worker to this thread
                 let (midi_tx, mut midi_rx) = mpsc::unbounded::<MidiMessage>();
-                let should_exit = Arc::new(AtomicBool::new(false));
 
                 // create MIDI input, forwarding events into this scope
                 // keep `_midi_in` alive to keep connection alive
                 let _midi_in = match create_input_connection(
-                    move |stamp, message, (tx, should_exit)| {
+                    move |stamp, message, tx| {
                         let msg = MidiMessage::from(message);
-                        if let Err(err) = tx.unbounded_send(msg) {
-                            // if failed to send, `rx` has been dropped
-                            // rx is dropped, the program must have quit
-                            let _ = should_exit.store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
+                        // don't care about error here.
+                        //
+                        // the only error that happens is when rx gets dropped, and that is already handled
+                        // below in the ping loop.
+                        let _ = tx.unbounded_send(msg);
                     },
-                    (midi_tx.clone(), should_exit.clone()),
+                    midi_tx,
                 ) {
                     Ok(x) => x,
                     Err(err) => {
                         // emit error event to channel
                         let evt = SimpleEvent::ConnectionError(err.to_string());
-                        if let Err(_) = simple_tx.unbounded_send(evt) {
+                        if simple_tx.unbounded_send(evt).is_err() {
                             // if failed to emit error, `rx` has been dropped
                             break 'outer;
                         }
@@ -108,7 +110,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                     Err(err) => {
                         // emit error event to channel
                         let evt = SimpleEvent::ConnectionError(err.to_string());
-                        if let Err(_) = simple_tx.unbounded_send(evt) {
+                        if simple_tx.unbounded_send(evt).is_err() {
                             // if failed to emit error, `rx` has been dropped
                             break 'outer;
                         }
@@ -130,7 +132,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                         if let Err(err) = res {
                             // emit error event to channel
                             let evt = SimpleEvent::ConnectionError(err.to_string());
-                            if let Err(_) = simple_tx.unbounded_send(evt) {
+                            if simple_tx.unbounded_send(evt).is_err() {
                                 // if failed to emit error, `rx` has been dropped
                                 break 'outer;
                             }
@@ -149,14 +151,16 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
 
                     // wait for the first scene update message
                     let fetch_task = async {
-                        while let Ok(MidiMessage::SysEx(sysex)) = midi_rx.recv().await {
-                            match msg::SceneDump::parse_sysex(&sysex) {
-                                Ok(dump) => {
-                                    return Ok(dump);
-                                }
-                                Err(err) => {
-                                    // TODO: log error
-                                    continue;
+                        while let Ok(msg) = midi_rx.recv().await {
+                            if let MidiMessage::SysEx(sysex) = msg {
+                                match msg::SceneDump::parse_sysex(&sysex) {
+                                    Ok(dump) => {
+                                        return Ok(dump);
+                                    }
+                                    Err(err) => {
+                                        // TODO: log error
+                                        continue;
+                                    }
                                 }
                             }
                         }
@@ -169,7 +173,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                         Err(err) => {
                             // emit error event to channel
                             let evt = SimpleEvent::ConnectionError(err.to_string());
-                            if let Err(_) = simple_tx.unbounded_send(evt) {
+                            if simple_tx.unbounded_send(evt).is_err() {
                                 // if failed to emit error, `rx` has been dropped
                                 break 'outer;
                             }
@@ -184,36 +188,68 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                 // emit success signal
                 {
                     let evt = SimpleEvent::ConnectionEstablished(dump.1);
-                    if let Err(_) = simple_tx.unbounded_send(evt) {
+                    if simple_tx.unbounded_send(evt).is_err() {
                         // if failed to emit error, `rx` has been dropped
                         break 'outer;
                     }
                 }
 
-                // keyboard ping loop
+                // keyboard ping loop + send simple events
+                let mut ping_timer = smol::Timer::after(PING_DURATION);
+
                 loop {
-                    // wait for the ping timer
-                    smol::Timer::after(PING_DURATION).await;
+                    // Some = rx event
+                    // None = timeout ping
+                    let ping_task = async {
+                        (&mut ping_timer).await;
+                        None
+                    };
+                    let rx_task = async { Some(midi_rx.recv().await) };
 
-                    // check if the MIDI worker has requested exiting
-                    if should_exit.load(std::sync::atomic::Ordering::Relaxed) {
-                        // exit this thread
-                        break 'outer;
-                    }
-
-                    // send regular "scene request" ping
-                    let req: Vec<u8> = msg::dump_scene_request(dump.0).into();
-                    if let Err(err) = midi_out.send(&req) {
-                        // emit error event to channel
-                        let evt = SimpleEvent::ConnectionError(err.to_string());
-                        if let Err(_) = simple_tx.unbounded_send(evt) {
-                            // if failed to emit error, `rx` has been dropped
-                            break 'outer;
+                    match rx_task.or(ping_task).await {
+                        // incoming event
+                        Some(Ok(msg)) => {
+                            if let Some(evt) = SimpleEvent::from_midi_message(&msg) {
+                                if simple_tx.unbounded_send(evt).is_err() {
+                                    // if failed to emit error, `rx` has been dropped
+                                    break 'outer;
+                                }
+                            }
                         }
+                        // MIDI worker tx got dropped, something went wrong with MIDI worker
+                        Some(Err(_)) => {
+                            // `midi_rx` stream ended (MIDI input callback dropped)
+                            let evt = SimpleEvent::ConnectionError(
+                                "MIDI worker ended unexpectedly".into(),
+                            );
+                            if simple_tx.unbounded_send(evt).is_err() {
+                                // if failed to emit error, `rx` has been dropped
+                                break 'outer;
+                            }
 
-                        // restart this loop and try to connect again
-                        thread::sleep(RETRY_DURATION);
-                        continue 'outer;
+                            // restart this loop and try to connect again
+                            thread::sleep(RETRY_DURATION);
+                            continue 'outer;
+                        }
+                        // it's keyboard pinging time
+                        None => {
+                            // reset timer for next loops
+                            ping_timer = smol::Timer::after(PING_DURATION);
+
+                            let req: Vec<u8> = msg::dump_scene_request(dump.0).into();
+                            if let Err(err) = midi_out.send(&req) {
+                                // emit error event to channel
+                                let evt = SimpleEvent::ConnectionError(err.to_string());
+                                if let Err(_) = simple_tx.unbounded_send(evt) {
+                                    // if failed to emit error, `rx` has been dropped
+                                    break 'outer;
+                                }
+
+                                // restart this loop and try to connect again
+                                thread::sleep(RETRY_DURATION);
+                                continue 'outer;
+                            }
+                        }
                     }
                 }
             }
