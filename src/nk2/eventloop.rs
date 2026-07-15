@@ -11,10 +11,10 @@ use crate::nk2::{
 };
 
 /// How long to wait before establishing/retrying a new connection
-const RETRY_DURATION: Duration = Duration::from_millis(200);
+const RETRY_DURATION: Duration = Duration::from_millis(500);
 
 /// How long between "fetch scene" requests to the keyboard
-const PING_DURATION: Duration = Duration::from_millis(200);
+const PING_DURATION: Duration = Duration::from_millis(500);
 
 /// Limited subset of MIDI events
 #[derive(Debug, Clone)]
