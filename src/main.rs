@@ -44,11 +44,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::MidiEventReceived(msg) => match msg {
             MidiMessage::NoteOn(_channel, evt) => {
-                if evt.value > 0 {
-                    state.pressed_keys[evt.key as usize] = true;
-                } else {
-                    state.pressed_keys[evt.key as usize] = false;
-                }
+                state.pressed_keys[evt.key as usize] = evt.value > 0;
             }
             MidiMessage::NoteOff(_channel, evt) => {
                 state.pressed_keys[evt.key as usize] = false;
@@ -153,50 +149,48 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
     ) -> Option<Action<Message>> {
         if let canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) =
             event
+            && let Some(position) = cursor.position_in(bounds)
         {
-            if let Some(position) = cursor.position_in(bounds) {
-                let white_key_width = 26.0;
-                let black_key_width = 14.0;
-                let bottom_bar_height = 20.0;
-                let keys_height = bounds.height - bottom_bar_height;
-                let black_key_height = keys_height * 0.6;
+            let white_key_width = 26.0;
+            let black_key_width = 14.0;
+            let bottom_bar_height = 20.0;
+            let keys_height = bounds.height - bottom_bar_height;
+            let black_key_height = keys_height * 0.6;
 
-                // How much we need to shift the keyboard to center the root note
-                let offset_x = (bounds.width / 2.0) - center_x(self.root_note, white_key_width);
+            // How much we need to shift the keyboard to center the root note
+            let offset_x = (bounds.width / 2.0) - center_x(self.root_note, white_key_width);
 
-                // Adjust position relative to note 0
-                let relative_x = position.x - offset_x;
-                let y = position.y;
+            // Adjust position relative to note 0
+            let relative_x = position.x - offset_x;
+            let y = position.y;
 
-                if y < keys_height {
-                    // 1. Check black keys first (they are physically drawn on top)
-                    if y < black_key_height {
-                        for n in 0..128 {
-                            if is_black(n) {
-                                let cx = center_x(n, white_key_width);
-                                if relative_x >= cx - black_key_width / 2.0
-                                    && relative_x <= cx + black_key_width / 2.0
-                                {
-                                    return Some(
-                                        Action::publish((self.on_root_note_changed)(n))
-                                            .and_capture(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    // 2. Check white keys if no black key was clicked
+            if y < keys_height {
+                // 1. Check black keys first (they are physically drawn on top)
+                if y < black_key_height {
                     for n in 0..128 {
-                        if !is_black(n) {
+                        if is_black(n) {
                             let cx = center_x(n, white_key_width);
-                            if relative_x >= cx - white_key_width / 2.0
-                                && relative_x <= cx + white_key_width / 2.0
+                            if relative_x >= cx - black_key_width / 2.0
+                                && relative_x <= cx + black_key_width / 2.0
                             {
                                 return Some(
                                     Action::publish((self.on_root_note_changed)(n)).and_capture(),
                                 );
                             }
+                        }
+                    }
+                }
+
+                // 2. Check white keys if no black key was clicked
+                for n in 0..128 {
+                    if !is_black(n) {
+                        let cx = center_x(n, white_key_width);
+                        if relative_x >= cx - white_key_width / 2.0
+                            && relative_x <= cx + white_key_width / 2.0
+                        {
+                            return Some(
+                                Action::publish((self.on_root_note_changed)(n)).and_capture(),
+                            );
                         }
                     }
                 }

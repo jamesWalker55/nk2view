@@ -1,5 +1,4 @@
 use midi_control::{MidiMessage, SysExEvent, message::SysExType, sysex::ManufacturerId};
-use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput};
 use thiserror::Error;
 
 use crate::nk2::scene::{InvalidSceneParam, Scene};
@@ -112,7 +111,7 @@ impl SceneDump {
         };
 
         // preamble
-        if &data[1..8] != &[0x00, 0x01, 0x11, 0x01, 0x7F, 0x4b, 0x40] {
+        if data[1..8] != [0x00, 0x01, 0x11, 0x01, 0x7F, 0x4b, 0x40] {
             return Err(ParseSceneDumpError::Malformed);
         }
 
@@ -208,12 +207,12 @@ impl Ack {
         };
 
         // preamble
-        if &data[1..6] != &[0x00, 0x01, 0x11, 0x01, 0x5F] {
+        if data[1..6] != [0x00, 0x01, 0x11, 0x01, 0x5F] {
             return Err(ParseAckError::Malformed);
         }
 
         // ending
-        if &data[7..9] != &[0x00, 0xF7] {
+        if data[7..9] != [0x00, 0xF7] {
             return Err(ParseAckError::Malformed);
         }
 

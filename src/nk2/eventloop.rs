@@ -1,13 +1,6 @@
-use std::{
-    sync::{Arc, atomic::AtomicBool},
-    thread,
-    time::Duration,
-};
+use std::{thread, time::Duration};
 
-use iced::futures::{
-    FutureExt,
-    channel::mpsc::{self, UnboundedReceiver},
-};
+use iced::futures::channel::mpsc::{self, UnboundedReceiver};
 use midi_control::MidiMessage;
 use smol::future::FutureExt as _;
 
@@ -40,9 +33,9 @@ pub enum SimpleEvent {
 impl SimpleEvent {
     fn from_midi_message(msg: &MidiMessage) -> Option<Self> {
         match msg {
-            MidiMessage::NoteOn(ch, evt) => Some(SimpleEvent::NoteOn(evt.key)),
-            MidiMessage::NoteOff(ch, evt) => Some(SimpleEvent::NoteOff(evt.key)),
-            MidiMessage::ControlChange(ch, evt) => {
+            MidiMessage::NoteOn(_ch, evt) => Some(SimpleEvent::NoteOn(evt.key)),
+            MidiMessage::NoteOff(_ch, evt) => Some(SimpleEvent::NoteOff(evt.key)),
+            MidiMessage::ControlChange(_ch, evt) => {
                 if evt.control == 120 || evt.control == 123 {
                     Some(SimpleEvent::AllNotesOff)
                 } else {
@@ -50,9 +43,9 @@ impl SimpleEvent {
                 }
             }
             MidiMessage::SysEx(evt) => {
-                if let Ok(evt) = msg::Ack::parse_sysex(&evt) {
+                if let Ok(evt) = msg::Ack::parse_sysex(evt) {
                     Some(SimpleEvent::Ack(evt))
-                } else if let Ok(evt) = msg::SceneDump::parse_sysex(&evt) {
+                } else if let Ok(evt) = msg::SceneDump::parse_sysex(evt) {
                     Some(SimpleEvent::SceneUpdated(evt.1))
                 } else {
                     // TODO: handle more sysex events
@@ -67,7 +60,7 @@ impl SimpleEvent {
 
 pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
     // channel for communicating with main thread
-    let (simple_tx, mut simple_rx) = mpsc::unbounded::<SimpleEvent>();
+    let (simple_tx, simple_rx) = mpsc::unbounded::<SimpleEvent>();
 
     std::thread::spawn(move || {
         smol::block_on(async {
@@ -79,7 +72,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                 // create MIDI input, forwarding events into this scope
                 // keep `_midi_in` alive to keep connection alive
                 let _midi_in = match create_input_connection(
-                    move |stamp, message, tx| {
+                    move |_stamp, message, tx| {
                         let msg = MidiMessage::from(message);
                         // don't care about error here.
                         //
@@ -157,7 +150,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                                     Ok(dump) => {
                                         return Ok(dump);
                                     }
-                                    Err(err) => {
+                                    Err(_err) => {
                                         // TODO: log error
                                         continue;
                                     }
@@ -209,11 +202,11 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                     match rx_task.or(ping_task).await {
                         // incoming event
                         Some(Ok(msg)) => {
-                            if let Some(evt) = SimpleEvent::from_midi_message(&msg) {
-                                if simple_tx.unbounded_send(evt).is_err() {
-                                    // if failed to emit error, `rx` has been dropped
-                                    break 'outer;
-                                }
+                            if let Some(evt) = SimpleEvent::from_midi_message(&msg)
+                                && simple_tx.unbounded_send(evt).is_err()
+                            {
+                                // if failed to emit error, `rx` has been dropped
+                                break 'outer;
                             }
                         }
                         // MIDI worker tx got dropped, something went wrong with MIDI worker
@@ -240,7 +233,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
                             if let Err(err) = midi_out.send(&req) {
                                 // emit error event to channel
                                 let evt = SimpleEvent::ConnectionError(err.to_string());
-                                if let Err(_) = simple_tx.unbounded_send(evt) {
+                                if simple_tx.unbounded_send(evt).is_err() {
                                     // if failed to emit error, `rx` has been dropped
                                     break 'outer;
                                 }
