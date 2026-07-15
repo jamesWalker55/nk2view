@@ -1,12 +1,10 @@
-use std::{thread, time::Duration};
-
-use iced::futures::{
-    FutureExt,
-    channel::{
-        mpsc::{self, UnboundedReceiver},
-        oneshot,
-    },
+use std::{
+    sync::{Arc, atomic::AtomicBool},
+    thread,
+    time::Duration,
 };
+
+use iced::futures::channel::mpsc::{self, UnboundedReceiver};
 use midi_control::MidiMessage;
 use smol::future::FutureExt as _;
 
@@ -71,23 +69,23 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
         smol::block_on(async {
             // connection restart loop, break this loop to stop the thread
             'outer: loop {
-                let (exit_signal_tx, exit_signal_rx) = oneshot::channel::<()>();
+                let should_exit = Arc::new(AtomicBool::new(false));
 
                 // create MIDI input
                 // keep `_midi_in` alive to keep connection alive
                 let _midi_in = match create_input_connection(
-                    move |stamp, message, tx| {
+                    move |stamp, message, (tx, should_exit)| {
                         let msg = MidiMessage::from(message);
                         if let Some(evt) = SimpleEvent::from_midi_message(&msg) {
-                            let res = tx.unbounded_send(evt);
-                            if let Err(err) = res {
+                            if let Err(err) = tx.unbounded_send(evt) {
                                 // if failed to send, `rx` has been dropped
                                 // rx is dropped, the program must have quit
-                                let _ = exit_signal_tx.send(());
+                                let _ =
+                                    should_exit.store(true, std::sync::atomic::Ordering::Relaxed);
                             }
                         }
                     },
-                    tx.clone(),
+                    (tx.clone(), should_exit.clone()),
                 ) {
                     Ok(x) => x,
                     Err(err) => {
@@ -188,22 +186,11 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
 
                 // keyboard ping loop
                 loop {
-                    // wait either for the ping timer, or a stop signal
-                    let should_exit = smol::Timer::after(PING_DURATION)
-                        .map(|_| false)
-                        .or(exit_signal_rx.map(|res| match res {
-                            Ok(_) => {
-                                // stop signal received!
-                                true
-                            }
-                            Err(_) => {
-                                // the sender (i.e. the MIDI handler) has dropped
-                                // should not happen normally?
-                                unreachable!("MIDI handler got dropped?!?!")
-                            }
-                        }))
-                        .await;
-                    if should_exit {
+                    // wait for the ping timer
+                    smol::Timer::after(PING_DURATION).await;
+
+                    // check if the MIDI worker has requested exiting
+                    if should_exit.load(std::sync::atomic::Ordering::Relaxed) {
                         // exit this thread
                         break 'outer;
                     }
