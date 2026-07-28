@@ -9,7 +9,7 @@ use midi_control::MidiMessage;
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, StreamExt};
 
-use crate::nk2::eventloop::{SimpleEvent, spawn_event_thread};
+use crate::nk2::eventloop::{KBEvent, spawn_event_thread};
 use crate::nk2::scene::Scene;
 
 pub fn main() -> iced::Result {
@@ -46,7 +46,7 @@ struct DisconnectedState {
 #[derive(Debug)]
 enum Message {
     Initialized { cmd_tx: UnboundedSender<Vec<u8>> },
-    Event(SimpleEvent),
+    KBEvent(KBEvent),
     RootNoteChanged(u8), // Emitted when the user clicks a key
 }
 
@@ -72,14 +72,14 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
     match app.state {
         // disconnected from keyboard
         State::Disconnected(ref mut state) => match msg {
-            Message::Event(SimpleEvent::ConnectionEstablished(scene)) => {
+            Message::KBEvent(KBEvent::ConnectionEstablished(scene)) => {
                 app.state = State::Connected(ConnectedState {
                     scene,
                     pressed_keys: [false; _],
                     popup: None,
                 })
             }
-            Message::Event(SimpleEvent::ConnectionError(text)) => {
+            Message::KBEvent(KBEvent::ConnectionError(text)) => {
                 state.message = text;
             }
             _ => {
@@ -89,27 +89,27 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
 
         // connected to keyboard
         State::Connected(ref mut state) => match msg {
-            Message::Event(SimpleEvent::ConnectionError(text)) => {
+            Message::KBEvent(KBEvent::ConnectionError(text)) => {
                 app.state = State::Disconnected(DisconnectedState { message: text });
             }
-            Message::Event(SimpleEvent::ConnectionEstablished(scene)) => {
+            Message::KBEvent(KBEvent::ConnectionEstablished(scene)) => {
                 state.scene = scene;
             }
-            Message::Event(SimpleEvent::NoteOn(note)) => {
+            Message::KBEvent(KBEvent::NoteOn(note)) => {
                 state.pressed_keys[note as usize] = true;
             }
-            Message::Event(SimpleEvent::NoteOff(note)) => {
+            Message::KBEvent(KBEvent::NoteOff(note)) => {
                 state.pressed_keys[note as usize] = false;
             }
-            Message::Event(SimpleEvent::AllNotesOff) => {
+            Message::KBEvent(KBEvent::AllNotesOff) => {
                 for key in state.pressed_keys.iter_mut() {
                     *key = false;
                 }
             }
-            Message::Event(SimpleEvent::SceneUpdated(scene)) => {
+            Message::KBEvent(KBEvent::SceneUpdated(scene)) => {
                 state.scene = scene;
             }
-            Message::Event(SimpleEvent::Ack(ack)) => match ack {
+            Message::KBEvent(KBEvent::Ack(ack)) => match ack {
                 nk2::msg::Ack::LoadCompleted(ch) => {
                     state.popup = Some(format!("Load Completed (ch. {ch})"));
                     println!("TODO: Ack::LoadCompleted({ch})");
@@ -194,7 +194,7 @@ fn subscription(_: &Option<App>) -> iced::Subscription<Message> {
                 .expect("initialize - send cmd_tx");
 
             while let Some(evt) = event_rx.next().await {
-                let _ = output.send(Message::Event(evt)).await;
+                let _ = output.send(Message::KBEvent(evt)).await;
             }
 
             std::future::pending().await

@@ -18,7 +18,7 @@ const PING_DURATION: Duration = Duration::from_millis(500);
 
 /// Limited subset of MIDI events
 #[derive(Debug, Clone)]
-pub enum SimpleEvent {
+pub enum KBEvent {
     // messages from keyboard
     NoteOn(u8),
     NoteOff(u8),
@@ -30,23 +30,23 @@ pub enum SimpleEvent {
     ConnectionError(String),
 }
 
-impl SimpleEvent {
+impl KBEvent {
     fn from_midi_message(msg: &MidiMessage) -> Option<Self> {
         match msg {
-            MidiMessage::NoteOn(_ch, evt) => Some(SimpleEvent::NoteOn(evt.key)),
-            MidiMessage::NoteOff(_ch, evt) => Some(SimpleEvent::NoteOff(evt.key)),
+            MidiMessage::NoteOn(_ch, evt) => Some(KBEvent::NoteOn(evt.key)),
+            MidiMessage::NoteOff(_ch, evt) => Some(KBEvent::NoteOff(evt.key)),
             MidiMessage::ControlChange(_ch, evt) => {
                 if evt.control == 120 || evt.control == 123 {
-                    Some(SimpleEvent::AllNotesOff)
+                    Some(KBEvent::AllNotesOff)
                 } else {
                     None
                 }
             }
             MidiMessage::SysEx(evt) => {
                 if let Ok(evt) = msg::Ack::parse_sysex(evt) {
-                    Some(SimpleEvent::Ack(evt))
+                    Some(KBEvent::Ack(evt))
                 } else if let Ok(evt) = msg::SceneDump::parse_sysex(evt) {
-                    Some(SimpleEvent::SceneUpdated(evt.1))
+                    Some(KBEvent::SceneUpdated(evt.1))
                 } else {
                     // TODO: handle more sysex events
                     None
@@ -63,8 +63,8 @@ enum SessionError {
     MainThreadDropped,
 }
 
-pub fn spawn_event_thread() -> (UnboundedSender<Vec<u8>>, UnboundedReceiver<SimpleEvent>) {
-    let (simple_tx, simple_rx) = mpsc::unbounded::<SimpleEvent>();
+pub fn spawn_event_thread() -> (UnboundedSender<Vec<u8>>, UnboundedReceiver<KBEvent>) {
+    let (simple_tx, simple_rx) = mpsc::unbounded::<KBEvent>();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded::<Vec<u8>>();
 
     std::thread::spawn(move || {
@@ -83,7 +83,7 @@ pub fn spawn_event_thread() -> (UnboundedSender<Vec<u8>>, UnboundedReceiver<Simp
                     Err(SessionError::ConnectionLost(err_msg)) => {
                         // keyboard disconnected / failed to connect
                         // emit error and retry
-                        let evt = SimpleEvent::ConnectionError(err_msg);
+                        let evt = KBEvent::ConnectionError(err_msg);
                         if simple_tx.unbounded_send(evt).is_err() {
                             // main thread dropped the receiver, quit this thread
                             break;
@@ -113,7 +113,7 @@ pub fn spawn_event_thread() -> (UnboundedSender<Vec<u8>>, UnboundedReceiver<Simp
 ///
 /// TODO: Handle when channel changes
 async fn run_session(
-    simple_tx: &UnboundedSender<SimpleEvent>,
+    simple_tx: &UnboundedSender<KBEvent>,
     cmd_rx: &mut UnboundedReceiver<Vec<u8>>,
 ) -> Result<(), SessionError> {
     // channel for forwarding events from MIDI worker to this thread
@@ -173,7 +173,7 @@ async fn run_session(
 
     // emit success signal
     simple_tx
-        .unbounded_send(SimpleEvent::ConnectionEstablished(dump.1))
+        .unbounded_send(KBEvent::ConnectionEstablished(dump.1))
         .map_err(|_| SessionError::MainThreadDropped)?;
 
     // keyboard ping loop + send simple events
@@ -211,7 +211,7 @@ async fn run_session(
         match rx_task.or(cmd_task).or(ping_task).await {
             // receive keyboard event
             LoopAction::MidiIn(Some(msg)) => {
-                if let Some(evt) = SimpleEvent::from_midi_message(&msg)
+                if let Some(evt) = KBEvent::from_midi_message(&msg)
                     && simple_tx.unbounded_send(evt).is_err()
                 {
                     return Err(SessionError::MainThreadDropped);
