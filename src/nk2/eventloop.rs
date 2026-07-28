@@ -250,6 +250,7 @@ async fn run_session(
 #[cfg(test)]
 #[test]
 #[ignore = "needs keyboard, runs forever, might become unkillable process"]
+// run with --nocapture
 fn test_session() {
     smol::block_on(async {
         let (_cmd_tx, mut events) = spawn_event_thread();
