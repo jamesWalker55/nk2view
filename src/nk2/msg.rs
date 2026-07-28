@@ -65,6 +65,7 @@ pub fn load_scene_request(ch: u8, scene: &Scene) -> MidiMessage {
         0x01,
         0x11,
         0x01,
+        0x7F,
         0x4B,
         0x40, // change request
     ]);
