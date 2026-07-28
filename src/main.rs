@@ -133,8 +133,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
 
                 let req =
                     crate::nk2::msg::load_scene_request(state.scene.midi_channel, &state.scene);
-                println!("send load scene request");
-                dbg!(&req);
+                println!("send load scene request: {req:?}");
                 app.cmd_tx
                     .unbounded_send(req.into())
                     .expect("TODO: midi worker terminated unexpectedly");
