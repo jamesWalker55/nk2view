@@ -1,5 +1,6 @@
 mod nk2;
 
+use iced::futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use iced::widget::canvas::{self, Canvas, Frame, Path, Program};
 use iced::widget::{Action, column, container, text};
 use iced::{Color, Element, Length, Point, Rectangle, Renderer, Size, Task, Theme, alignment};
@@ -7,6 +8,9 @@ use midi_control::MidiMessage;
 
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, StreamExt};
+
+use crate::nk2::eventloop::{SimpleEvent, spawn_event_thread};
+use crate::nk2::scene::Scene;
 
 pub fn main() -> iced::Result {
     iced::application(boot, update, view)
@@ -16,60 +20,159 @@ pub fn main() -> iced::Result {
         .run()
 }
 
-struct State {
-    pressed_keys: [bool; 128],
-    root_note: u8, // Tracks the currently centered note (default: C4 = 60)
+struct App {
+    cmd_tx: UnboundedSender<Vec<u8>>,
+    state: State,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            pressed_keys: [false; 128],
-            root_note: 60, // 60 is standard Middle C (C4)
-        }
-    }
+#[derive(Debug)]
+enum State {
+    Connected(ConnectedState),
+    Disconnected(DisconnectedState),
+}
+
+#[derive(Debug)]
+struct ConnectedState {
+    scene: Scene,
+    pressed_keys: [bool; 128],
+    popup: Option<String>,
+}
+
+#[derive(Debug)]
+struct DisconnectedState {
+    message: String,
 }
 
 #[derive(Debug)]
 enum Message {
-    MidiEventReceived(MidiMessage),
+    Initialized { cmd_tx: UnboundedSender<Vec<u8>> },
+    Event(SimpleEvent),
     RootNoteChanged(u8), // Emitted when the user clicks a key
 }
 
-fn boot() -> (State, Task<Message>) {
-    (State::default(), Task::none())
+fn boot() -> (Option<App>, Task<Message>) {
+    (None, Task::none())
 }
 
-fn update(state: &mut State, message: Message) -> Task<Message> {
-    match message {
-        Message::MidiEventReceived(msg) => match msg {
-            MidiMessage::NoteOn(_channel, evt) => {
-                state.pressed_keys[evt.key as usize] = evt.value > 0;
-            }
-            MidiMessage::NoteOff(_channel, evt) => {
-                state.pressed_keys[evt.key as usize] = false;
-            }
-            _ => (),
-        },
-        Message::RootNoteChanged(new_root) => {
-            state.root_note = new_root;
-
-            // TODO: Emit your transpose command to your MIDI device here!
-            // e.g., send_transpose_command(new_root as i8 - 60);
-            println!("Root note changed to: {}", new_root);
+fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
+    let Some(app) = app else {
+        // app not yet initialized
+        if let Message::Initialized { cmd_tx } = msg {
+            let new_state = DisconnectedState {
+                message: "just started".into(),
+            };
+            *app = Some(App {
+                cmd_tx,
+                state: State::Disconnected(new_state),
+            })
         }
+        return Task::none();
+    };
+
+    match app.state {
+        // disconnected from keyboard
+        State::Disconnected(ref mut state) => match msg {
+            Message::Event(SimpleEvent::ConnectionEstablished(scene)) => {
+                app.state = State::Connected(ConnectedState {
+                    scene,
+                    pressed_keys: [false; _],
+                    popup: None,
+                })
+            }
+            Message::Event(SimpleEvent::ConnectionError(text)) => {
+                state.message = text;
+            }
+            _ => {
+                println!("got `{msg:?}` while disconnected?!");
+            }
+        },
+
+        // connected to keyboard
+        State::Connected(ref mut state) => match msg {
+            Message::Event(SimpleEvent::ConnectionError(text)) => {
+                app.state = State::Disconnected(DisconnectedState { message: text });
+            }
+            Message::Event(SimpleEvent::ConnectionEstablished(scene)) => {
+                state.scene = scene;
+            }
+            Message::Event(SimpleEvent::NoteOn(note)) => {
+                state.pressed_keys[note as usize] = true;
+            }
+            Message::Event(SimpleEvent::NoteOff(note)) => {
+                state.pressed_keys[note as usize] = false;
+            }
+            Message::Event(SimpleEvent::AllNotesOff) => {
+                for key in state.pressed_keys.iter_mut() {
+                    *key = false;
+                }
+            }
+            Message::Event(SimpleEvent::SceneUpdated(scene)) => {
+                state.scene = scene;
+            }
+            Message::Event(SimpleEvent::Ack(ack)) => match ack {
+                nk2::msg::Ack::LoadCompleted(ch) => {
+                    state.popup = Some(format!("Load Completed (ch. {ch})"));
+                    println!("TODO: Ack::LoadCompleted({ch})");
+                }
+                nk2::msg::Ack::WriteCompleted(ch) => {
+                    state.popup = Some(format!("Write Completed (ch. {ch})"));
+                    println!("TODO: Ack::WriteCompleted({ch})");
+                }
+                nk2::msg::Ack::LoadError(ch) => {
+                    state.popup = Some(format!("Load Error (ch. {ch})"));
+                    println!("TODO: Ack::LoadError({ch})")
+                }
+                nk2::msg::Ack::WriteError(ch) => {
+                    state.popup = Some(format!("Write Error (ch. {ch})"));
+                    println!("TODO: Ack::WriteError({ch})")
+                }
+            },
+            Message::RootNoteChanged(new_root) => {
+                println!("Root note changed to: {}", new_root);
+                state.scene.transpose = new_root;
+
+                let req =
+                    crate::nk2::msg::load_scene_request(state.scene.midi_channel, &state.scene);
+                println!("send load scene request");
+                dbg!(&req);
+                app.cmd_tx
+                    .unbounded_send(req.into())
+                    .expect("TODO: midi worker terminated unexpectedly");
+            }
+            Message::Initialized { cmd_tx: _ } => {
+                unreachable!("should not receive Initialized message")
+            }
+        },
     }
+
     Task::none()
 }
 
-fn view(state: &State) -> Element<'_, Message> {
+fn view(app: &Option<App>) -> Element<'_, Message> {
+    let Some(app) = app else {
+        return container(text("initializing").align_x(alignment::Alignment::Center))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+    };
+
     let canvas = Canvas::new(KeyboardProgram {
-        pressed_keys: &state.pressed_keys,
-        root_note: state.root_note,
+        pressed_keys: match app.state {
+            State::Connected(ref state) => &state.pressed_keys,
+            State::Disconnected(_) => &const { [false; _] },
+        },
+        root_note: match app.state {
+            State::Connected(ref state) => state.scene.transpose,
+            State::Disconnected(_) => 64,
+        },
         on_root_note_changed: Box::new(Message::RootNoteChanged),
     })
     .width(Length::Fill)
     .height(Length::Fixed(150.0));
+
+    if matches!(app.state, State::Disconnected(_)) {
+        return text("disconnected").into();
+    }
 
     container(
         column![text("Live MIDI Keyboard Visualizer").size(30), canvas]
@@ -81,22 +184,18 @@ fn view(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-fn subscription(_state: &State) -> iced::Subscription<Message> {
+fn subscription(_: &Option<App>) -> iced::Subscription<Message> {
     iced::Subscription::run(|| {
         iced::stream::channel(100, |mut output: mpsc::Sender<Message>| async move {
-            let (tx, mut rx) = mpsc::unbounded();
+            let (cmd_tx, mut event_rx) = spawn_event_thread();
 
-            let _conn = nk2::connection::create_input_connection(
-                move |_stamp, message, _| {
-                    let msg = MidiMessage::from(message);
-                    let _ = tx.unbounded_send(msg);
-                },
-                (),
-            )
-            .unwrap();
+            output
+                .send(Message::Initialized { cmd_tx })
+                .await
+                .expect("initialize - send cmd_tx");
 
-            while let Some(msg) = rx.next().await {
-                let _ = output.send(Message::MidiEventReceived(msg)).await;
+            while let Some(evt) = event_rx.next().await {
+                let _ = output.send(Message::Event(evt)).await;
             }
 
             std::future::pending().await

@@ -63,14 +63,15 @@ enum SessionError {
     MainThreadDropped,
 }
 
-pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
+pub fn spawn_event_thread() -> (UnboundedSender<Vec<u8>>, UnboundedReceiver<SimpleEvent>) {
     let (simple_tx, simple_rx) = mpsc::unbounded::<SimpleEvent>();
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded::<Vec<u8>>();
 
     std::thread::spawn(move || {
         smol::block_on(async {
             // run forever until main thread drops the receiver
             loop {
-                match run_session(&simple_tx).await {
+                match run_session(&simple_tx, &mut cmd_rx).await {
                     // it will never return Ok, I'm just using `Result` so I can use `?` inside the function
                     Ok(_) => unreachable!("session loop should never exit cleanly"),
 
@@ -96,7 +97,7 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
         });
     });
 
-    simple_rx
+    (cmd_tx, simple_rx)
 }
 
 /// Run an (almost) infinite loop that:
@@ -109,7 +110,12 @@ pub fn spawn_event_thread() -> UnboundedReceiver<SimpleEvent> {
 ///
 /// - any of the above steps fail
 /// - keyboard unexpectedly disconnects on step 3
-async fn run_session(simple_tx: &UnboundedSender<SimpleEvent>) -> Result<(), SessionError> {
+///
+/// TODO: Handle when channel changes
+async fn run_session(
+    simple_tx: &UnboundedSender<SimpleEvent>,
+    cmd_rx: &mut UnboundedReceiver<Vec<u8>>,
+) -> Result<(), SessionError> {
     // channel for forwarding events from MIDI worker to this thread
     let (midi_tx, mut midi_rx) = mpsc::unbounded::<MidiMessage>();
 
@@ -162,8 +168,8 @@ async fn run_session(simple_tx: &UnboundedSender<SimpleEvent>) -> Result<(), Ses
             ))
         };
 
-        fetch_task.or(timeout_task).await?
-    };
+        fetch_task.or(timeout_task).await
+    }?;
 
     // emit success signal
     simple_tx
@@ -174,34 +180,63 @@ async fn run_session(simple_tx: &UnboundedSender<SimpleEvent>) -> Result<(), Ses
     let mut ping_timer = smol::Timer::after(PING_DURATION);
 
     loop {
+        enum LoopAction {
+            MidiIn(Option<MidiMessage>),
+            CommandIn(Option<Vec<u8>>),
+            Ping,
+        }
+
+        // receive keyboard event
+        let rx_task = async {
+            match midi_rx.recv().await {
+                Ok(msg) => LoopAction::MidiIn(Some(msg)),
+                Err(_) => LoopAction::MidiIn(None),
+            }
+        };
+
+        // send keyboard event
+        let cmd_task = async {
+            match cmd_rx.recv().await {
+                Ok(cmd) => LoopAction::CommandIn(Some(cmd)),
+                Err(_) => LoopAction::CommandIn(None),
+            }
+        };
+
+        // keyboard ping timer
         let ping_task = async {
             (&mut ping_timer).await;
-            None // Signifies timeout
+            LoopAction::Ping
         };
 
-        let rx_task = async {
-            Some(midi_rx.recv().await) // Signifies channel event
-        };
-
-        match rx_task.or(ping_task).await {
-            // incoming event
-            Some(Ok(msg)) => {
-                // Using let_chains here perfectly!
+        match rx_task.or(cmd_task).or(ping_task).await {
+            // receive keyboard event
+            LoopAction::MidiIn(Some(msg)) => {
                 if let Some(evt) = SimpleEvent::from_midi_message(&msg)
                     && simple_tx.unbounded_send(evt).is_err()
                 {
                     return Err(SessionError::MainThreadDropped);
                 }
             }
-            // MIDI worker tx got dropped, something went wrong with MIDI worker
-            Some(Err(_)) => {
+            LoopAction::MidiIn(None) => {
                 return Err(SessionError::ConnectionLost(
                     "MIDI worker ended unexpectedly".into(),
                 ));
             }
-            // it's keyboard pinging time
-            None => {
-                ping_timer = smol::Timer::after(PING_DURATION); // Reset timer
+
+            // send keyboard event
+            LoopAction::CommandIn(Some(cmd)) => {
+                midi_out
+                    .send(&cmd)
+                    .map_err(|e| SessionError::ConnectionLost(e.to_string()))?;
+            }
+            LoopAction::CommandIn(None) => {
+                // If the main thread drops the sender, it means the application is likely shutting down.
+                return Err(SessionError::MainThreadDropped);
+            }
+
+            // keyboard ping timer
+            LoopAction::Ping => {
+                ping_timer = smol::Timer::after(PING_DURATION);
 
                 let req: Vec<u8> = msg::dump_scene_request(dump.0).into();
                 midi_out
@@ -214,10 +249,28 @@ async fn run_session(simple_tx: &UnboundedSender<SimpleEvent>) -> Result<(), Ses
 
 #[cfg(test)]
 #[test]
-#[ignore = "needs keyboard, runs forever"]
+#[ignore = "needs keyboard, runs forever, might become unkillable process"]
 fn test_session() {
     smol::block_on(async {
-        let mut events = spawn_event_thread();
+        let (_cmd_tx, mut events) = spawn_event_thread();
+
+        while let Ok(evt) = events.recv().await {
+            println!("{evt:?}");
+        }
+    });
+}
+
+#[cfg(test)]
+#[test]
+#[ignore = "needs keyboard"]
+fn test_session_2() {
+    smol::block_on(async {
+        let (cmd_tx, mut events) = spawn_event_thread();
+
+        cmd_tx.unbounded_send(msg::dump_scene_request(0).into());
+
+        // let evt = events.recv().await;
+        // dbg!(evt);
         while let Ok(evt) = events.recv().await {
             println!("{evt:?}");
         }
