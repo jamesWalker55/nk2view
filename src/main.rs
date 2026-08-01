@@ -36,7 +36,7 @@ enum State {
     /// The initial state.
     Disconnected(DisconnectedState),
     /// Transition state between 'disconnected' and 'connected'
-    FetchingScene { timeout_handle: iced::task::Handle },
+    FetchingScene { _timeout_handle: iced::task::Handle },
 }
 
 #[derive(Debug)]
@@ -105,7 +105,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
 
                 // transition state
                 app.state = State::FetchingScene {
-                    timeout_handle: handle.abort_on_drop(),
+                    _timeout_handle: handle.abort_on_drop(),
                 };
 
                 return task;
