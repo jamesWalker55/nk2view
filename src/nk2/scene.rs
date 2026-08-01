@@ -1,58 +1,59 @@
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
-#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
-enum Speed {
+pub enum Speed {
     Immediate = 0,
     Fast = 1,
     Normal = 2,
     Slow = 3,
 }
 
-#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
-enum VelocityCurve {
+pub enum VelocityCurve {
     Light = 0,
     Normal = 1,
     Heavy = 2,
     Const = 3,
 }
 
-#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
-enum ButtonBehaviour {
+pub enum ButtonBehaviour {
     Momentary = 0,
     Toggle = 1,
 }
 
-struct Scene {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scene {
     /// 0..=15
-    midi_channel: u8,
-    pitch_bend_speed: Speed,
+    pub midi_channel: u8,
+    pub pitch_bend_speed: Speed,
     /// 64 +/- 12 => -12..12
-    transpose: u8,
-    velocity_curve: VelocityCurve,
+    pub transpose: u8,
+    pub velocity_curve: VelocityCurve,
     /// 1..=127
-    velocity_constant_value: u8,
-    mod_enable: bool,
+    pub velocity_constant_value: u8,
+    pub mod_enable: bool,
     /// 0..=127
-    mod_cc: u8,
-    mod_behaviour: ButtonBehaviour,
+    pub mod_cc: u8,
+    pub mod_behaviour: ButtonBehaviour,
     /// 0..=127
-    mod_off_value: u8,
+    pub mod_off_value: u8,
     /// 0..=127
-    mod_on_value: u8,
-    mod_speed: Speed,
-    sustain_enable: bool,
+    pub mod_on_value: u8,
+    pub mod_speed: Speed,
+    pub sustain_enable: bool,
     /// 0..=127
-    sustain_cc: u8,
-    sustain_behaviour: ButtonBehaviour,
+    pub sustain_cc: u8,
+    pub sustain_behaviour: ButtonBehaviour,
     /// 0..=127
-    sustain_off_value: u8,
+    pub sustain_off_value: u8,
     /// 0..=127
-    sustain_on_value: u8,
-    sustain_speed: Speed,
+    pub sustain_on_value: u8,
+    pub sustain_speed: Speed,
 }
 
 impl Default for Scene {
@@ -81,7 +82,7 @@ impl Default for Scene {
 
 #[derive(Error, Debug)]
 #[error("invalid scene value for {name}: {value}")]
-struct InvalidSceneParam {
+pub struct InvalidSceneParam {
     name: &'static str,
     value: u8,
 }
@@ -154,6 +155,58 @@ impl Scene {
         data[33] = self.sustain_on_value & 0b0111_1111;
         data[34] = self.sustain_speed.into();
 
+        // there is 1 extra byte, so 2nd-last byte has first bit set
+        data[72] = 0b0000_0001;
+
         data
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // const FULL_DATA: [u8; 83] = [
+    //     64, 0, 1, 17, 1, 127, 75, 64, 122, 0, 127, 2, 127, 127, 127, 127, 113, 127, 66, 1, 100,
+    //     127, 127, 127, 3, 127, 127, 1, 1, 0, 0, 127, 6, 2, 127, 127, 1, 64, 0, 0, 124, 127, 2,
+    //     127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
+    //     127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
+    //     127, 127, 127, 1, 127, 247,
+    // ];
+    const SCENE_A_DATA: [u8; 74] = [
+        122, 0, 127, 2, 127, 127, 127, 127, 113, 127, 66, 1, 100, 127, 127, 127, 3, 127, 127, 1, 1,
+        0, 0, 127, 6, 2, 127, 127, 1, 64, 0, 0, 124, 127, 2, 127, 127, 127, 127, 127, 127, 127,
+        127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
+        127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 1, 127,
+    ];
+    const SCENE_A: Scene = Scene {
+        midi_channel: 0,
+        pitch_bend_speed: Speed::Normal,
+        transpose: 66,
+        velocity_curve: VelocityCurve::Normal,
+        velocity_constant_value: 100,
+        mod_enable: true,
+        mod_cc: 1,
+        mod_behaviour: ButtonBehaviour::Momentary,
+        mod_off_value: 0,
+        mod_on_value: 127,
+        mod_speed: Speed::Normal,
+        sustain_enable: true,
+        sustain_cc: 64,
+        sustain_behaviour: ButtonBehaviour::Momentary,
+        sustain_off_value: 0,
+        sustain_on_value: 127,
+        sustain_speed: Speed::Normal,
+    };
+
+    #[test]
+    fn test_parse() {
+        let scene = Scene::from_midi_bytes(&SCENE_A_DATA).unwrap();
+        assert_eq!(scene, SCENE_A);
+    }
+
+    #[test]
+    fn test_serialize() {
+        assert_eq!(SCENE_A.to_midi_bytes(), SCENE_A_DATA);
     }
 }
