@@ -70,14 +70,14 @@ enum SessionError {
 }
 
 pub fn spawn_event_thread() -> (UnboundedSender<KBAction>, UnboundedReceiver<KBEvent>) {
-    let (simple_tx, simple_rx) = mpsc::unbounded::<KBEvent>();
+    let (evt_tx, evt_rx) = mpsc::unbounded::<KBEvent>();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded::<KBAction>();
 
     std::thread::spawn(move || {
         smol::block_on(async {
             // run forever until main thread drops the receiver
             loop {
-                match run_session(&simple_tx, &mut cmd_rx).await {
+                match run_session(&evt_tx, &mut cmd_rx).await {
                     Err(SessionError::MainThreadDropped) => {
                         // The main application closed the receiver channel, stop the thread
                         break;
@@ -86,7 +86,7 @@ pub fn spawn_event_thread() -> (UnboundedSender<KBAction>, UnboundedReceiver<KBE
                     // return Ok(()) to indicate a user-requested refresh
                     Ok(_) => {
                         let evt = KBEvent::ConnectionLost("user-triggered refresh".into());
-                        if simple_tx.unbounded_send(evt).is_err() {
+                        if evt_tx.unbounded_send(evt).is_err() {
                             // main thread dropped the receiver, quit this thread
                             break;
                         }
@@ -98,7 +98,7 @@ pub fn spawn_event_thread() -> (UnboundedSender<KBAction>, UnboundedReceiver<KBE
                         // keyboard disconnected / failed to connect
                         // emit error and retry
                         let evt = KBEvent::ConnectionLost(err_msg);
-                        if simple_tx.unbounded_send(evt).is_err() {
+                        if evt_tx.unbounded_send(evt).is_err() {
                             // main thread dropped the receiver, quit this thread
                             break;
                         }
@@ -111,7 +111,7 @@ pub fn spawn_event_thread() -> (UnboundedSender<KBAction>, UnboundedReceiver<KBE
         });
     });
 
-    (cmd_tx, simple_rx)
+    (cmd_tx, evt_rx)
 }
 
 /// Run an (almost) infinite loop that:

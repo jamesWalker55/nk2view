@@ -1,6 +1,8 @@
 mod nk2;
 mod widgets;
 
+use std::time::Duration;
+
 use iced::futures::channel::mpsc::UnboundedSender;
 use iced::widget::canvas::Canvas;
 use iced::widget::{button, column, container, text};
@@ -34,7 +36,7 @@ enum State {
     /// The initial state.
     Disconnected(DisconnectedState),
     /// Transition state between 'disconnected' and 'connected'
-    FetchingScene,
+    FetchingScene { timeout_handle: iced::task::Handle },
 }
 
 #[derive(Debug)]
@@ -51,10 +53,16 @@ struct DisconnectedState {
 
 #[derive(Debug, Clone)]
 enum Message {
-    Initialized { cmd_tx: UnboundedSender<KBAction> },
+    Initialized {
+        cmd_tx: UnboundedSender<KBAction>,
+    },
     KBEvent(KBEvent),
-    RootNoteChanged(u8), // Emitted when the user clicks a key
-    ReconnectRequested,  // Emitted when the user clicks the refresh button
+    /// Emitted when the user clicks a key
+    RootNoteChanged(u8),
+    /// Emitted when the user clicks the refresh button
+    ReconnectRequested,
+    /// Emitted if the 'fetching' state doesn't get a response from keyboard within some time
+    FetchTimeout,
 }
 
 fn boot() -> (Option<App>, Task<Message>) {
@@ -81,14 +89,26 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
         State::Disconnected(ref mut state) => match msg {
             Message::KBEvent(KBEvent::ConnectionEstablished) => {
                 // send request to fetch scene data
-                app.state = State::FetchingScene;
-
                 for i in 0u8..=15u8 {
                     let msg = dump_scene_request(i);
                     app.cmd_tx
                         .unbounded_send(KBAction::Send(msg))
                         .expect("TODO: midi worker terminated unexpectedly");
                 }
+
+                // send timeout message after 50ms if still in 'fetching' state
+                let (task, handle) = Task::perform(
+                    async { smol::Timer::after(Duration::from_millis(50)).await },
+                    |_| Message::FetchTimeout,
+                )
+                .abortable();
+
+                // transition state
+                app.state = State::FetchingScene {
+                    timeout_handle: handle.abort_on_drop(),
+                };
+
+                return task;
             }
             Message::KBEvent(KBEvent::ConnectionLost(text)) => {
                 state.message = text;
@@ -99,13 +119,18 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
         },
 
         // established connection, get some initial data
-        State::FetchingScene => match msg {
+        State::FetchingScene { .. } => match msg {
             Message::KBEvent(KBEvent::SceneDump(scene)) => {
                 app.state = State::Connected(ConnectedState {
                     scene,
                     pressed_keys: [false; _],
                     popup: None,
                 })
+            }
+            Message::FetchTimeout => {
+                app.state = State::Disconnected(DisconnectedState {
+                    message: "fetch timed out".into(),
+                });
             }
             Message::KBEvent(KBEvent::ConnectionLost(text)) => {
                 app.state = State::Disconnected(DisconnectedState { message: text });
@@ -119,10 +144,6 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
         State::Connected(ref mut state) => match msg {
             Message::KBEvent(KBEvent::ConnectionLost(text)) => {
                 app.state = State::Disconnected(DisconnectedState { message: text });
-            }
-            Message::KBEvent(KBEvent::ConnectionEstablished) => {
-                // should not happen while we are in connected state
-                println!("got `KBEvent::ConnectionEstablished` while connected?!");
             }
             Message::KBEvent(KBEvent::NoteOn(note)) => {
                 state.pressed_keys[note as usize] = true;
@@ -172,9 +193,13 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                     .unbounded_send(KBAction::Reconnect)
                     .expect("TODO: midi worker terminated unexpectedly");
             }
+            Message::KBEvent(KBEvent::ConnectionEstablished) => {
+                unreachable!("should not receive ConnectionEstablished message")
+            }
             Message::Initialized { cmd_tx: _ } => {
                 unreachable!("should not receive Initialized message")
             }
+            Message::FetchTimeout => unreachable!("should not receive FetchTimeout message"),
         },
     }
 
@@ -193,12 +218,12 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
         pressed_keys: match app.state {
             State::Connected(ref state) => &state.pressed_keys,
             State::Disconnected(_) => &const { [false; _] },
-            State::FetchingScene => &const { [false; _] },
+            State::FetchingScene { .. } => &const { [false; _] },
         },
         root_note: match app.state {
             State::Connected(ref state) => state.scene.transpose,
             State::Disconnected(_) => 64,
-            State::FetchingScene => 64,
+            State::FetchingScene { .. } => 64,
         },
         on_root_note_changed: Box::new(Message::RootNoteChanged),
     })
@@ -234,6 +259,12 @@ fn subscription(_: &Option<App>) -> iced::Subscription<Message> {
                 .expect("initialize - send cmd_tx");
 
             while let Some(evt) = event_rx.next().await {
+                // if received disconnect message, drain any leftover MIDI events from queue
+                if matches!(evt, KBEvent::ConnectionLost(_)) {
+                    while let Ok(_) = event_rx.try_recv() {
+                        // do nothing, just drain
+                    }
+                }
                 let _ = output.send(Message::KBEvent(evt)).await;
             }
 
