@@ -28,7 +28,7 @@ pub struct KeyboardProgram<'a, Message> {
     pub pressed_keys: &'a [bool; 128],
     pub root_note: u8,
     // Callback to emit messages generically when a key is clicked
-    pub on_root_note_changed: Box<dyn Fn(u8) -> Message + 'a>,
+    pub on_note_clicked: Box<dyn Fn(u8) -> Message + 'a>,
 }
 
 impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
@@ -68,7 +68,7 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
                                 && relative_x <= cx + black_key_width / 2.0
                             {
                                 return Some(
-                                    Action::publish((self.on_root_note_changed)(n)).and_capture(),
+                                    Action::publish((self.on_note_clicked)(n)).and_capture(),
                                 );
                             }
                         }
@@ -83,7 +83,7 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
                             && relative_x <= cx + white_key_width / 2.0
                         {
                             return Some(
-                                Action::publish((self.on_root_note_changed)(n)).and_capture(),
+                                Action::publish((self.on_note_clicked)(n)).and_capture(),
                             );
                         }
                     }

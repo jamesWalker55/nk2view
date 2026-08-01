@@ -225,7 +225,7 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
             State::Disconnected(_) => 64,
             State::FetchingScene { .. } => 64,
         },
-        on_root_note_changed: Box::new(Message::RootNoteChanged),
+        on_note_clicked: Box::new(Message::RootNoteChanged),
     })
     .width(Length::Fill)
     .height(Length::Fixed(150.0));
