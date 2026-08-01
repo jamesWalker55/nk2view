@@ -11,23 +11,20 @@ use crate::nk2::{
 };
 
 /// How long to wait before establishing/retrying a new connection
-const RETRY_DURATION: Duration = Duration::from_millis(500);
+const RETRY_DURATION: Duration = Duration::from_millis(100);
 
-/// How long between "fetch scene" requests to the keyboard
-const PING_DURATION: Duration = Duration::from_millis(500);
-
-/// Limited subset of MIDI events
+/// Limited subset of MIDI events from keyboard to client
 #[derive(Debug, Clone)]
 pub enum KBEvent {
     // messages from keyboard
     NoteOn(u8),
     NoteOff(u8),
     AllNotesOff,
-    SceneUpdated(Scene),
+    SceneDump(Scene),
     Ack(msg::Ack),
     // messages from establishing connection with keyboard
-    ConnectionEstablished(Scene),
-    ConnectionError(String),
+    ConnectionEstablished,
+    ConnectionLost(String),
 }
 
 impl KBEvent {
@@ -46,7 +43,7 @@ impl KBEvent {
                 if let Ok(evt) = msg::Ack::parse_sysex(evt) {
                     Some(KBEvent::Ack(evt))
                 } else if let Ok(evt) = msg::SceneDump::parse_sysex(evt) {
-                    Some(KBEvent::SceneUpdated(evt.1))
+                    Some(KBEvent::SceneDump(evt.1))
                 } else {
                     // TODO: handle more sysex events
                     None
@@ -58,32 +55,49 @@ impl KBEvent {
     }
 }
 
+/// Actions we can perform to the keyboard
+#[derive(Debug)]
+pub enum KBAction {
+    Reconnect,
+    Send(MidiMessage),
+}
+
+/// Internal enum for handling control flow
+#[derive(Debug, Clone)]
 enum SessionError {
     ConnectionLost(String),
     MainThreadDropped,
 }
 
-pub fn spawn_event_thread() -> (UnboundedSender<Vec<u8>>, UnboundedReceiver<KBEvent>) {
+pub fn spawn_event_thread() -> (UnboundedSender<KBAction>, UnboundedReceiver<KBEvent>) {
     let (simple_tx, simple_rx) = mpsc::unbounded::<KBEvent>();
-    let (cmd_tx, mut cmd_rx) = mpsc::unbounded::<Vec<u8>>();
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded::<KBAction>();
 
     std::thread::spawn(move || {
         smol::block_on(async {
             // run forever until main thread drops the receiver
             loop {
                 match run_session(&simple_tx, &mut cmd_rx).await {
-                    // it will never return Ok, I'm just using `Result` so I can use `?` inside the function
-                    Ok(_) => unreachable!("session loop should never exit cleanly"),
-
                     Err(SessionError::MainThreadDropped) => {
                         // The main application closed the receiver channel, stop the thread
                         break;
                     }
 
+                    // return Ok(()) to indicate a user-requested refresh
+                    Ok(_) => {
+                        let evt = KBEvent::ConnectionLost("user-triggered refresh".into());
+                        if simple_tx.unbounded_send(evt).is_err() {
+                            // main thread dropped the receiver, quit this thread
+                            break;
+                        }
+
+                        continue;
+                    }
+
                     Err(SessionError::ConnectionLost(err_msg)) => {
                         // keyboard disconnected / failed to connect
                         // emit error and retry
-                        let evt = KBEvent::ConnectionError(err_msg);
+                        let evt = KBEvent::ConnectionLost(err_msg);
                         if simple_tx.unbounded_send(evt).is_err() {
                             // main thread dropped the receiver, quit this thread
                             break;
@@ -114,7 +128,7 @@ pub fn spawn_event_thread() -> (UnboundedSender<Vec<u8>>, UnboundedReceiver<KBEv
 /// TODO: Handle when channel changes
 async fn run_session(
     simple_tx: &UnboundedSender<KBEvent>,
-    cmd_rx: &mut UnboundedReceiver<Vec<u8>>,
+    cmd_rx: &mut UnboundedReceiver<KBAction>,
 ) -> Result<(), SessionError> {
     // channel for forwarding events from MIDI worker to this thread
     let (midi_tx, mut midi_rx) = mpsc::unbounded::<MidiMessage>();
@@ -133,115 +147,64 @@ async fn run_session(
     let mut midi_out =
         create_output_connection().map_err(|e| SessionError::ConnectionLost(e.to_string()))?;
 
-    // determine what channel the keyboard is on
-    let dump = {
-        // request keyboard to dump scene on every channel
-        for i in 0u8..=15u8 {
-            let data: Vec<u8> = msg::dump_scene_request(i).into();
-            midi_out
-                .send(&data)
-                .map_err(|e| SessionError::ConnectionLost(e.to_string()))?;
-        }
-
-        // must receive message from keyboard within 50ms
-        let timeout_task = async {
-            smol::Timer::after(Duration::from_millis(50)).await;
-            Err(SessionError::ConnectionLost(
-                "timeout trying to determine the keyboard channel".into(),
-            ))
-        };
-
-        // wait for the first scene update message
-        let fetch_task = async {
-            // Using .recv() and ignoring irrelevant messages gracefully
-            while let Ok(msg) = midi_rx.recv().await {
-                if let MidiMessage::SysEx(sysex) = msg {
-                    if let Ok(dump) = msg::SceneDump::parse_sysex(&sysex) {
-                        return Ok(dump);
-                    } else {
-                        // TODO: log error
-                    }
-                }
-            }
-            Err(SessionError::ConnectionLost(
-                "channel closed while fetching scene".into(),
-            ))
-        };
-
-        fetch_task.or(timeout_task).await
-    }?;
-
     // emit success signal
     simple_tx
-        .unbounded_send(KBEvent::ConnectionEstablished(dump.1))
+        .unbounded_send(KBEvent::ConnectionEstablished)
         .map_err(|_| SessionError::MainThreadDropped)?;
-
-    // keyboard ping loop + send simple events
-    let mut ping_timer = smol::Timer::after(PING_DURATION);
 
     loop {
         enum LoopAction {
-            MidiIn(Option<MidiMessage>),
-            CommandIn(Option<Vec<u8>>),
-            Ping,
+            MidiIn(MidiMessage),
+            MidiWorkerDied,
+            PerformAction(KBAction),
+            MainThreadDropped,
         }
 
         // receive keyboard event
         let rx_task = async {
             match midi_rx.recv().await {
-                Ok(msg) => LoopAction::MidiIn(Some(msg)),
-                Err(_) => LoopAction::MidiIn(None),
+                Ok(msg) => LoopAction::MidiIn(msg),
+                Err(_) => LoopAction::MidiWorkerDied,
             }
         };
 
         // send keyboard event
         let cmd_task = async {
             match cmd_rx.recv().await {
-                Ok(cmd) => LoopAction::CommandIn(Some(cmd)),
-                Err(_) => LoopAction::CommandIn(None),
+                Ok(cmd) => LoopAction::PerformAction(cmd),
+                Err(_) => LoopAction::MainThreadDropped,
             }
         };
 
-        // keyboard ping timer
-        let ping_task = async {
-            (&mut ping_timer).await;
-            LoopAction::Ping
-        };
-
-        match rx_task.or(cmd_task).or(ping_task).await {
+        match rx_task.or(cmd_task).await {
             // receive keyboard event
-            LoopAction::MidiIn(Some(msg)) => {
+            LoopAction::MidiIn(msg) => {
                 if let Some(evt) = KBEvent::from_midi_message(&msg)
                     && simple_tx.unbounded_send(evt).is_err()
                 {
                     return Err(SessionError::MainThreadDropped);
                 }
             }
-            LoopAction::MidiIn(None) => {
+            LoopAction::MidiWorkerDied => {
                 return Err(SessionError::ConnectionLost(
                     "MIDI worker ended unexpectedly".into(),
                 ));
             }
 
             // send keyboard event
-            LoopAction::CommandIn(Some(cmd)) => {
+            LoopAction::PerformAction(KBAction::Send(msg)) => {
+                let msg: Vec<u8> = msg.into();
                 midi_out
-                    .send(&cmd)
+                    .send(&msg)
                     .map_err(|e| SessionError::ConnectionLost(e.to_string()))?;
             }
-            LoopAction::CommandIn(None) => {
+            LoopAction::PerformAction(KBAction::Reconnect) => {
+                // manually trigger reconnect
+                return Ok(());
+            }
+            LoopAction::MainThreadDropped => {
                 // If the main thread drops the sender, it means the application is likely shutting down.
                 return Err(SessionError::MainThreadDropped);
-            }
-
-            // keyboard ping timer
-            LoopAction::Ping => {
-                ping_timer = smol::Timer::after(PING_DURATION);
-
-                let req: Vec<u8> = msg::dump_scene_request(dump.0).into();
-                midi_out
-                    .send(&req)
-                    .map_err(|e| SessionError::ConnectionLost(e.to_string()))?;
             }
         }
     }
@@ -268,7 +231,7 @@ fn test_session_2() {
     smol::block_on(async {
         let (cmd_tx, mut events) = spawn_event_thread();
 
-        cmd_tx.unbounded_send(msg::dump_scene_request(0).into());
+        cmd_tx.unbounded_send(KBAction::Send(msg::dump_scene_request(0)));
 
         // let evt = events.recv().await;
         // dbg!(evt);
