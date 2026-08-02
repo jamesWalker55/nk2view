@@ -236,7 +236,6 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
 
     container(
         column![
-            text("Live MIDI Keyboard Visualizer").size(30),
             canvas.height(Length::Fill),
             button("reconnect").on_press(Message::ReconnectRequested)
         ]
