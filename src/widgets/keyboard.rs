@@ -36,63 +36,68 @@ fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
             let origin: f32 =
                 (center_x - sizes.white / 2.0 - sizes.white * center_idx as f32).round();
 
-            // how many white notes are visible to the left/right of our centered note?
-            let additional_white_notes_per_side =
-                ((bounds.width / 2.0 - sizes.white / 2.0) / sizes.white).ceil() as usize;
-
-            // loop visible white notes
-            let white_min_idx = center_idx
-                .checked_sub(additional_white_notes_per_side)
-                .unwrap_or(0);
-            let white_max_idx =
-                (center_idx + additional_white_notes_per_side).min(WHITE_NOTES.len() - 1);
-            for draw_idx in white_min_idx..=white_max_idx {
-                let draw_note = WHITE_NOTES[draw_idx];
+            // loop visible white notes ("idx" does not count black notes, so only 75 white notes in total)
+            const fn white_idx_to_note(idx: u8) -> u8 {
+                ((idx / 7) * 12)
+                    + match idx % 7 {
+                        0 => 0,
+                        1 => 2,
+                        2 => 4,
+                        3 => 5,
+                        4 => 7,
+                        5 => 9,
+                        6 => 11,
+                        _ => unreachable!(),
+                    }
+            }
+            let white_idx_min = ((bounds.x - origin) / sizes.white).floor().clamp(0.0, 75.0) as u8;
+            let white_idx_max = ((bounds.x - origin + bounds.width) / sizes.white)
+                .ceil()
+                .clamp(0.0, 75.0) as u8;
+            for draw_idx in white_idx_min..white_idx_max {
                 let draw_rect = Path::rectangle(
                     Point::new(origin + sizes.white * draw_idx as f32, bounds.y),
                     Size::new(sizes.white, bounds.height),
                 );
             }
 
-            // loop visible black notes
-            let black_min_note = WHITE_NOTES[white_min_idx]
-                .checked_sub(1)
-                .unwrap_or(1)
-                .max(1);
-            let black_max_note = (WHITE_NOTES[white_max_idx] + 1).max(126);
-            for draw_note in black_min_note..=black_max_note {
-                let draw_x = match draw_note % 12 {
-                    1 => {
-                        origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 1.0
-                            - sizes.black / 2.0
-                            - sizes.cd_offset
-                    }
-                    3 => {
-                        origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 2.0
-                            - sizes.black / 2.0
-                            + sizes.cd_offset
-                    }
-                    6 => {
-                        origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 4.0
-                            - sizes.black / 2.0
-                            - sizes.fa_offset
-                    }
-                    8 => {
-                        origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 5.0
-                            - sizes.black / 2.0
-                            + 0.0
-                    }
-                    10 => {
-                        origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 6.0
-                            - sizes.black / 2.0
-                            + sizes.fa_offset
-                    }
-                    // skip non-black note
-                    _ => continue,
+            // loop visible black notes ("idx" does not count white notes, so only 53 black notes in total)
+            let black_idx_min = white_idx_min / 7 * 5
+                + match white_idx_min % 7 {
+                    0 => 0,
+                    1 => 0,
+                    2 => 1,
+                    3 => 2,
+                    4 => 2,
+                    5 => 3,
+                    6 => 4,
+                    _ => unreachable!(),
                 };
+            let black_idx_max = white_idx_max / 7 * 5
+                + match white_idx_max % 7 {
+                    0 => 0,
+                    1 => 1,
+                    2 => 1,
+                    3 => 2,
+                    4 => 3,
+                    5 => 4,
+                    6 => 4,
+                    _ => unreachable!(),
+                };
+            for draw_idx in black_idx_min..black_idx_max {
+                let draw_x = origin
+                    + ((draw_idx / 5) as f32 * sizes.white * 7.0)
+                    + match draw_idx % 5 {
+                        0 => sizes.white * 1.0 - sizes.black / 2.0 - sizes.cd_offset,
+                        1 => sizes.white * 2.0 - sizes.black / 2.0 + sizes.cd_offset,
+                        2 => sizes.white * 4.0 - sizes.black / 2.0 - sizes.fa_offset,
+                        3 => sizes.white * 5.0 - sizes.black / 2.0 + 0.0,
+                        4 => sizes.white * 6.0 - sizes.black / 2.0 + sizes.fa_offset,
+                        _ => unreachable!(),
+                    };
                 let draw_rect = Path::rectangle(
                     Point::new(draw_x, bounds.y),
-                    Size::new(sizes.black, bounds.height * 0.6),
+                    Size::new(sizes.black, (bounds.height * 0.6).round()),
                 );
             }
         }
@@ -100,6 +105,66 @@ fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
             // find top-left x position of note 0
             // we are centered on a black note, there are `i` white notes to our left
             let origin: f32 = (center_x - black_x_offset - sizes.white * i as f32).round();
+
+            // // how many white notes are visible to the left/right of our centered note?
+            // let additional_white_notes_per_side =
+            //     ((bounds.width / 2.0 - sizes.white / 2.0) / sizes.white).ceil() as usize;
+
+            // // loop visible white notes
+            // let white_min_idx = center_idx
+            //     .checked_sub(additional_white_notes_per_side)
+            //     .unwrap_or(0);
+            // let white_max_idx =
+            //     (center_idx + additional_white_notes_per_side).min(WHITE_NOTES.len() - 1);
+            // for draw_idx in white_min_idx..=white_max_idx {
+            //     let draw_note = WHITE_NOTES[draw_idx];
+            //     let draw_rect = Path::rectangle(
+            //         Point::new(origin + sizes.white * draw_idx as f32, bounds.y),
+            //         Size::new(sizes.white, bounds.height),
+            //     );
+            // }
+
+            // // loop visible black notes
+            // let black_min_note = WHITE_NOTES[white_min_idx]
+            //     .checked_sub(1)
+            //     .unwrap_or(1)
+            //     .max(1);
+            // let black_max_note = (WHITE_NOTES[white_max_idx] + 1).max(126);
+            // for draw_note in black_min_note..=black_max_note {
+            //     let draw_x = match draw_note % 12 {
+            //         1 => {
+            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 1.0
+            //                 - sizes.black / 2.0
+            //                 - sizes.cd_offset
+            //         }
+            //         3 => {
+            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 2.0
+            //                 - sizes.black / 2.0
+            //                 + sizes.cd_offset
+            //         }
+            //         6 => {
+            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 4.0
+            //                 - sizes.black / 2.0
+            //                 - sizes.fa_offset
+            //         }
+            //         8 => {
+            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 5.0
+            //                 - sizes.black / 2.0
+            //                 + 0.0
+            //         }
+            //         10 => {
+            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 6.0
+            //                 - sizes.black / 2.0
+            //                 + sizes.fa_offset
+            //         }
+            //         // skip non-black note
+            //         _ => continue,
+            //     };
+            //     let draw_rect = Path::rectangle(
+            //         Point::new(draw_x, bounds.y),
+            //         Size::new(sizes.black, bounds.height * 0.6),
+            //     );
+            // }
         }
     }
 
