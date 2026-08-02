@@ -1,6 +1,6 @@
 use iced::widget::Action;
 use iced::widget::canvas::{self, Frame, Path, Program};
-use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
+use iced::{Color, Padding, Point, Rectangle, Renderer, Size, Theme};
 
 const WHITE_NOTES: [u8; 75] = [
     000, 002, 004, 005, 007, 009, 011, 012, 014, 016, 017, 019, 021, 023, 024, 026, 028, 029, 031,
@@ -65,10 +65,27 @@ mod tests {
     }
 }
 
-fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
+const COLOR_WHITE: Color = Color::from_rgb(0.85, 0.85, 0.85);
+const COLOR_BLACK: Color = Color::from_rgb(0.2, 0.2, 0.2);
+const COLOR_PRESSED: Color = Color::from_rgb(0.4, 0.7, 1.0);
+const COLOR_BORDER: Color = Color::BLACK;
+
+fn draw_piano(
+    frame: &mut Frame,
+    pressed_keys: &[bool; 128],
+    center_note: u8,
+    note_width: u8,
+    bounds: Rectangle,
+) {
+    // fill whole frame black for a simple border
+    frame.fill(
+        &Path::rectangle(bounds.position(), bounds.size()),
+        COLOR_BORDER,
+    );
+
     let sizes = Sizes::from_white(note_width);
 
-    let center_x = bounds.x + bounds.width / 2.0;
+    let center_x = bounds.center_x();
 
     // find top-left x position of note 0
     let origin: f32 = match center_note % 12 {
@@ -91,6 +108,19 @@ fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
     .round();
 
     // loop visible white notes ("idx" does not count black notes, so only 75 white notes in total)
+    const fn white_idx_to_note(idx: u8) -> u8 {
+        ((idx / 7) * 12)
+            + match idx % 7 {
+                0 => 0,
+                1 => 2,
+                2 => 4,
+                3 => 5,
+                4 => 7,
+                5 => 9,
+                6 => 11,
+                _ => unreachable!(),
+            }
+    }
     let white_idx_min = ((bounds.x - origin) / sizes.white).floor().clamp(0.0, 75.0) as u8;
     let white_idx_max = ((bounds.x - origin + bounds.width) / sizes.white)
         .ceil()
@@ -98,11 +128,28 @@ fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
     for draw_idx in white_idx_min..white_idx_max {
         let draw_rect = Path::rectangle(
             Point::new(origin + sizes.white * draw_idx as f32, bounds.y),
-            Size::new(sizes.white, bounds.height),
+            Size::new(sizes.white - 1.0, bounds.height - 1.0), // `- 1.0` for a border
         );
+        let color = if pressed_keys[white_idx_to_note(draw_idx) as usize] {
+            COLOR_PRESSED
+        } else {
+            COLOR_WHITE
+        };
+        frame.fill(&draw_rect, color);
     }
 
     // loop visible black notes ("idx" does not count white notes, so only 53 black notes in total)
+    const fn black_idx_to_note(idx: u8) -> u8 {
+        ((idx / 5) * 12)
+            + match idx % 5 {
+                0 => 1,
+                1 => 3,
+                2 => 6,
+                3 => 8,
+                4 => 10,
+                _ => unreachable!(),
+            }
+    }
     let black_idx_min = white_idx_min / 7 * 5
         + match white_idx_min % 7 {
             0 => 0,
@@ -124,7 +171,8 @@ fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
             5 => 4,
             6 => 4,
             _ => unreachable!(),
-        };
+        }
+        .min(52);
     for draw_idx in black_idx_min..black_idx_max {
         let draw_x = origin
             + ((draw_idx / 5) as f32 * sizes.white * 7.0)
@@ -140,8 +188,13 @@ fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
             Point::new(draw_x, bounds.y),
             Size::new(sizes.black, (bounds.height * 0.6).round()),
         );
+        let color = if pressed_keys[dbg!(black_idx_to_note(draw_idx)) as usize] {
+            COLOR_PRESSED
+        } else {
+            COLOR_BLACK
+        };
+        frame.fill(&draw_rect, color);
     }
-    todo!()
 }
 
 // Returns the visual index of a white key (ignores black keys).
@@ -165,10 +218,6 @@ fn center_x(n: u8, white_key_width: f32) -> f32 {
         white_index(n) * white_key_width + white_key_width / 2.0
     }
 }
-
-const COLOR_WHITE: Color = Color::from_rgb(0.85, 0.85, 0.85);
-const COLOR_BLACK: Color = Color::from_rgb(0.2, 0.2, 0.2);
-const COLOR_PRESSED: Color = Color::from_rgb(0.4, 0.7, 1.0);
 
 pub struct KeyboardProgram<'a, Message> {
     pub pressed_keys: &'a [bool; 128],
@@ -247,63 +296,20 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        let white_key_width = 26.0;
+        let white_key_width = 20.0;
         let black_key_width = 14.0;
         let bottom_bar_height = 20.0;
         let keys_height = bounds.height - bottom_bar_height;
-        let black_key_height = keys_height * 0.6;
 
         let offset_x = (bounds.width / 2.0) - center_x(self.root_note, white_key_width);
 
-        // Draw a black background. This easily creates the 1px black outline between keys!
-        frame.fill(&Path::rectangle(Point::ORIGIN, bounds.size()), Color::BLACK);
-
-        // 1. Draw White Keys
-        for n in 0..128 {
-            if !is_black(n) {
-                let cx = center_x(n, white_key_width) + offset_x;
-
-                // Optimization: Don't draw keys that are outside the window bounds
-                if cx + white_key_width / 2.0 < 0.0 || cx - white_key_width / 2.0 > bounds.width {
-                    continue;
-                }
-
-                let color = if self.pressed_keys[n as usize] {
-                    COLOR_PRESSED
-                } else {
-                    COLOR_WHITE
-                };
-
-                // Shrinking the width by 1.0 creates a natural black border from the background
-                let path = Path::rectangle(
-                    Point::new(cx - white_key_width / 2.0, 0.0),
-                    Size::new(white_key_width - 1.0, keys_height),
-                );
-                frame.fill(&path, color);
-            }
-        }
-
-        // 2. Draw Black Keys
-        for n in 0..128 {
-            if is_black(n) {
-                let cx = center_x(n, white_key_width) + offset_x;
-                if cx + black_key_width / 2.0 < 0.0 || cx - black_key_width / 2.0 > bounds.width {
-                    continue;
-                }
-
-                let color = if self.pressed_keys[n as usize] {
-                    COLOR_PRESSED
-                } else {
-                    COLOR_BLACK
-                };
-
-                let path = Path::rectangle(
-                    Point::new(cx - black_key_width / 2.0, 0.0),
-                    Size::new(black_key_width, black_key_height),
-                );
-                frame.fill(&path, color);
-            }
-        }
+        draw_piano(
+            &mut frame,
+            &self.pressed_keys,
+            self.root_note,
+            white_key_width.round() as u8,
+            bounds.shrink(Padding::default().bottom(bottom_bar_height)),
+        );
 
         // 3. Draw Bottom Indicator Bar
         // (The background of the bar is already black from the base fill)
