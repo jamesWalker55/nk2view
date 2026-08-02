@@ -38,21 +38,6 @@ impl Sizes {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_name() {
-        dbg!(const { Sizes::from_white(20) });
-        dbg!(const { Sizes::from_white(24) });
-        dbg!(const { Sizes::from_white(28) });
-        dbg!(const { Sizes::from_white(34) });
-        dbg!(const { Sizes::from_white(40) });
-        assert!(false);
-    }
-}
-
 const COLOR_WHITE: Color = Color::from_rgb(0.85, 0.85, 0.85);
 const COLOR_BLACK: Color = Color::from_rgb(0.2, 0.2, 0.2);
 const COLOR_PRESSED: Color = Color::from_rgb(0.4, 0.7, 1.0);
@@ -62,6 +47,28 @@ const COLOR_BAR_HIGHLIGHT: Color = Color::from_rgb(1.0, 0.0, 0.0);
 
 const NUM_WHITE_KEYS: u8 = 75;
 const NUM_BLACK_KEYS: u8 = 53;
+
+const BOTTOM_BAR_HEIGHT: f32 = 8.0;
+
+/// The range of notes that respond to clicks, centered on middle C.
+/// `CLICKABLE_MIN_WHITE_IDX`/`MAX_WHITE_IDX` below are *derived* from these
+/// two numbers, so the status-bar highlight can never drift out of sync
+/// with what's actually clickable in `update()`.
+const CLICKABLE_CENTER_NOTE: u8 = 60; // C4
+const CLICKABLE_RANGE_SEMITONES: u8 = 12; // one octave each direction
+const CLICKABLE_MIN_NOTE: u8 = CLICKABLE_CENTER_NOTE - CLICKABLE_RANGE_SEMITONES;
+const CLICKABLE_MAX_NOTE: u8 = CLICKABLE_CENTER_NOTE + CLICKABLE_RANGE_SEMITONES;
+
+// Evaluated at compile time (these are `const`, and `note_to_white_idx` is a
+// `const fn`). If CLICKABLE_MIN_NOTE/MAX_NOTE above ever stop landing on
+// white keys, this fails to *compile* instead of panicking the first time
+// someone clicks near the edge of the range.
+const CLICKABLE_MIN_WHITE_IDX: u8 = note_to_white_idx(CLICKABLE_MIN_NOTE);
+const CLICKABLE_MAX_WHITE_IDX: u8 = note_to_white_idx(CLICKABLE_MAX_NOTE);
+
+const fn is_clickable(note: u8) -> bool {
+    CLICKABLE_MIN_NOTE <= note && note <= CLICKABLE_MAX_NOTE
+}
 
 const fn white_idx_to_note(idx: u8) -> u8 {
     ((idx / 7) * 12)
@@ -89,6 +96,23 @@ const fn black_idx_to_note(idx: u8) -> u8 {
         }
 }
 
+/// Inverse of `white_idx_to_note`. Only valid for notes that are actually
+/// white keys — panics otherwise (at compile time, if called from a const
+/// context, as it is above).
+const fn note_to_white_idx(note: u8) -> u8 {
+    (note / 12) * 7
+        + match note % 12 {
+            0 => 0,
+            2 => 1,
+            4 => 2,
+            5 => 3,
+            7 => 4,
+            9 => 5,
+            11 => 6,
+            _ => panic!("note_to_white_idx called with a black note"),
+        }
+}
+
 /// x position of the top-left corner of white key idx 0, such that
 /// `center_note` is centered at `center_x`.
 fn compute_origin(center_x: f32, center_note: u8, sizes: &Sizes) -> f32 {
@@ -97,7 +121,7 @@ fn compute_origin(center_x: f32, center_note: u8, sizes: &Sizes) -> f32 {
         1 => center_x + sizes.cd_offset - sizes.white * (center_note / 12 * 7 + 1) as f32,
         3 => center_x - sizes.cd_offset - sizes.white * (center_note / 12 * 7 + 2) as f32,
         6 => center_x + sizes.fa_offset - sizes.white * (center_note / 12 * 7 + 4) as f32,
-        8 => center_x + 0.0000000000000 - sizes.white * (center_note / 12 * 7 + 5) as f32,
+        8 => center_x - sizes.white * (center_note / 12 * 7 + 5) as f32,
         10 => center_x - sizes.fa_offset - sizes.white * (center_note / 12 * 7 + 6) as f32,
         // center note is white
         0 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 0) as f32,
@@ -172,17 +196,129 @@ fn visible_white_keys<'a>(
     })
 }
 
-/// Returns the note under `point` (canvas-local coordinates), if any.
-/// Checks black keys first since they're drawn on top of white keys —
-/// same visible set, same rects, as `draw_piano` used to paint them.
-fn hit_test_piano(point: Point, center_note: u8, note_width: u8, bounds: Rectangle) -> Option<u8> {
+/// Returns the note under `point` (coordinates relative to `rect_keys`),
+/// if any. Checks black keys first since they're drawn on top of white keys.
+fn hit_test_piano(
+    point: Point,
+    center_note: u8,
+    note_width: u8,
+    rect_keys: Rectangle,
+) -> Option<u8> {
     let sizes = Sizes::from_white(note_width);
-    let origin = compute_origin(bounds.center_x(), center_note, &sizes);
+    let origin = compute_origin(rect_keys.center_x(), center_note, &sizes);
 
-    visible_black_keys(&sizes, origin, &bounds)
-        .chain(visible_white_keys(&sizes, origin, &bounds))
+    visible_black_keys(&sizes, origin, &rect_keys)
+        .chain(visible_white_keys(&sizes, origin, &rect_keys))
         .find(|key| key.rect.contains(point))
         .map(|key| key.note)
+}
+
+/// Splits the widget's full bounds into the piano-key area and the status
+/// bar beneath it. Both `update` and `draw` need this same split, so it
+/// lives in one place instead of being recomputed independently in each.
+fn split_bounds(total_size: Size) -> (Rectangle, Rectangle) {
+    let keys_height = (total_size.height - BOTTOM_BAR_HEIGHT).max(0.0);
+    let rect_keys = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: total_size.width,
+        height: keys_height,
+    };
+    let rect_bar = Rectangle {
+        x: 0.0,
+        y: keys_height,
+        width: total_size.width,
+        height: BOTTOM_BAR_HEIGHT,
+    };
+    (rect_keys, rect_bar)
+}
+
+fn draw_keys(
+    frame: &mut Frame,
+    pressed_keys: &[bool; 128],
+    sizes: &Sizes,
+    origin: f32,
+    rect_keys: Rectangle,
+) {
+    for key in visible_white_keys(sizes, origin, &rect_keys) {
+        let color = if pressed_keys[key.note as usize] {
+            COLOR_PRESSED
+        } else {
+            COLOR_WHITE
+        };
+        frame.fill(
+            &Path::rectangle(key.rect.position(), key.rect.size()),
+            color,
+        );
+    }
+    for key in visible_black_keys(sizes, origin, &rect_keys) {
+        let color = if pressed_keys[key.note as usize] {
+            COLOR_PRESSED
+        } else {
+            COLOR_BLACK
+        };
+        frame.fill(
+            &Path::rectangle(key.rect.position(), key.rect.size()),
+            color,
+        );
+    }
+}
+
+fn draw_range_indicator(
+    frame: &mut Frame,
+    sizes: &Sizes,
+    origin: f32,
+    rect_keys: Rectangle,
+    rect_bar: Rectangle,
+    root_note: u8,
+) {
+    // bg of the indicator, spanning exactly the clickable range
+    let bounding_rect = {
+        let leftmost = white_key_rect(CLICKABLE_MIN_WHITE_IDX, sizes, origin, &rect_keys);
+        let rightmost = white_key_rect(CLICKABLE_MAX_WHITE_IDX, sizes, origin, &rect_keys);
+        Rectangle {
+            x: leftmost.x,
+            y: rect_bar.y,
+            width: rightmost.x + rightmost.width - leftmost.x,
+            height: rect_bar.height,
+        }
+    };
+    frame.fill(
+        &Path::rectangle(
+            Point {
+                x: bounding_rect.x + 1.0,
+                y: bounding_rect.y,
+            },
+            Size {
+                width: bounding_rect.width - 1.0,
+                height: bounding_rect.height - 1.0,
+            },
+        ),
+        COLOR_BAR_BG,
+    );
+
+    // the actual center indicator
+    let width = match root_note % 12 {
+        // black note
+        1 | 3 | 6 | 8 | 10 => sizes.black,
+        // white note
+        _ => sizes.white,
+    };
+    let indicator_inner_rect = Rectangle {
+        x: (rect_keys.center_x() - width / 2.0).round(),
+        y: bounding_rect.y,
+        width: width - 1.0,
+        height: bounding_rect.height - 1.0,
+    };
+    let indicator_outer_rect = indicator_inner_rect.expand(1.0);
+    frame.fill(
+        &Path::rectangle(indicator_outer_rect.position(), indicator_outer_rect.size()),
+        COLOR_BORDER,
+    );
+    frame.fill(
+        &Path::rectangle(indicator_inner_rect.position(), indicator_inner_rect.size()),
+        COLOR_BAR_HIGHLIGHT,
+    );
 }
 
 pub struct KeyboardProgram<'a, Message> {
@@ -192,8 +328,6 @@ pub struct KeyboardProgram<'a, Message> {
     // Callback to emit messages generically when a key is clicked
     pub on_note_clicked: Box<dyn Fn(u8) -> Message + 'a>,
 }
-
-const BOTTOM_BAR_HEIGHT: f32 = 8.0;
 
 impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
     type State = ();
@@ -209,21 +343,11 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
             event
             && let Some(position) = cursor.position_in(bounds)
         {
-            let clicked_note = hit_test_piano(
-                position,
-                self.root_note,
-                self.note_width,
-                Rectangle {
-                    x: 0.0,
-                    y: 0.0,
-                    width: bounds.width,
-                    height: bounds.height - BOTTOM_BAR_HEIGHT,
-                },
-            );
+            let (rect_keys, _) = split_bounds(bounds.size());
+            let clicked_note = hit_test_piano(position, self.root_note, self.note_width, rect_keys);
             if let Some(clicked_note) = clicked_note
-                && ((60 - 12) <= clicked_note && clicked_note <= (60 + 12))
+                && is_clickable(clicked_note)
             {
-                // only allow clicking between 1 octave of C4 (60)
                 return Some(Action::publish((self.on_note_clicked)(clicked_note)).and_capture());
             }
         }
@@ -239,109 +363,26 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let sizes = Sizes::from_white(self.note_width);
-
         let mut frame = Frame::new(renderer, raw_bounds.size());
-        // frame uses local coordinates, not global coordinates
-        let rect_all = Rectangle::new(Point::ORIGIN, raw_bounds.size());
-        let rect_keys = Rectangle {
-            x: 0.0,
-            y: 0.0,
-            width: raw_bounds.width,
-            height: raw_bounds.height - BOTTOM_BAR_HEIGHT,
-        };
-        let rect_bar = Rectangle {
-            x: 0.0,
-            y: raw_bounds.height - BOTTOM_BAR_HEIGHT,
-            width: raw_bounds.width,
-            height: BOTTOM_BAR_HEIGHT,
-        };
 
         // fill whole area for easy border
         frame.fill(
-            &Path::rectangle(rect_all.position(), rect_all.size()),
+            &Path::rectangle(Point::ORIGIN, raw_bounds.size()),
             COLOR_BORDER,
         );
 
+        let (rect_keys, rect_bar) = split_bounds(raw_bounds.size());
         let origin = compute_origin(rect_keys.center_x(), self.root_note, &sizes);
 
-        // draw piano keyboard whites
-        for key in visible_white_keys(&sizes, origin, &rect_keys) {
-            let color = if self.pressed_keys[key.note as usize] {
-                COLOR_PRESSED
-            } else {
-                COLOR_WHITE
-            };
-            frame.fill(
-                &Path::rectangle(key.rect.position(), key.rect.size()),
-                color,
-            );
-        }
-
-        // draw piano keyboard blacks
-        for key in visible_black_keys(&sizes, origin, &rect_keys) {
-            let color = if self.pressed_keys[key.note as usize] {
-                COLOR_PRESSED
-            } else {
-                COLOR_BLACK
-            };
-            frame.fill(
-                &Path::rectangle(key.rect.position(), key.rect.size()),
-                color,
-            );
-        }
-
-        // draw bottom indicator
-        {
-            // bg of the indicator
-            let bounding_rect = {
-                let leftmost =
-                    white_key_rect(const { 60 / 12 * 7 - 7 }, &sizes, origin, &rect_keys);
-                let rightmost =
-                    white_key_rect(const { 60 / 12 * 7 + 7 }, &sizes, origin, &rect_keys);
-                Rectangle {
-                    x: leftmost.x,
-                    y: rect_bar.y,
-                    width: rightmost.x + rightmost.width - leftmost.x,
-                    height: rect_bar.height,
-                }
-            };
-            frame.fill(
-                &Path::rectangle(
-                    Point {
-                        x: bounding_rect.x + 1.0,
-                        y: bounding_rect.y,
-                    },
-                    Size {
-                        width: bounding_rect.width - 1.0,
-                        height: bounding_rect.height - 1.0,
-                    },
-                ),
-                COLOR_BAR_BG,
-            );
-
-            // the actual center indicator
-            let width = match self.root_note % 12 {
-                // black note
-                1 | 3 | 6 | 8 | 10 => sizes.black,
-                // white note
-                _ => sizes.white,
-            };
-            let indicator_inner_rect = Rectangle {
-                x: (rect_all.center_x() - width / 2.0).round(),
-                y: bounding_rect.y,
-                width: width - 1.0,
-                height: bounding_rect.height - 1.0,
-            };
-            let indicator_outer_rect = indicator_inner_rect.expand(1.0);
-            frame.fill(
-                &Path::rectangle(indicator_outer_rect.position(), indicator_outer_rect.size()),
-                COLOR_BORDER,
-            );
-            frame.fill(
-                &Path::rectangle(indicator_inner_rect.position(), indicator_inner_rect.size()),
-                COLOR_BAR_HIGHLIGHT,
-            );
-        }
+        draw_keys(&mut frame, self.pressed_keys, &sizes, origin, rect_keys);
+        draw_range_indicator(
+            &mut frame,
+            &sizes,
+            origin,
+            rect_keys,
+            rect_bar,
+            self.root_note,
+        );
 
         vec![frame.into_geometry()]
     }
