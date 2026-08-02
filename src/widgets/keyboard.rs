@@ -334,7 +334,7 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        let white_key_width = 20.0;
+        let white_key_width = 24.0;
         let black_key_width = 14.0;
         let bottom_bar_height = 20.0;
         let keys_height = bounds.height - bottom_bar_height;
@@ -346,7 +346,13 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
             &self.pressed_keys,
             self.root_note,
             white_key_width.round() as u8,
-            bounds.shrink(Padding::default().bottom(bottom_bar_height)),
+            // a frame uses local coordinates, not global coordinates
+            Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: bounds.width,
+                height: bounds.height - bottom_bar_height,
+            },
         );
 
         // 3. Draw Bottom Indicator Bar
