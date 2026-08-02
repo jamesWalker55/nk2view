@@ -1,18 +1,6 @@
 use iced::widget::Action;
 use iced::widget::canvas::{self, Frame, Path, Program};
-use iced::{Color, Padding, Point, Rectangle, Renderer, Size, Theme};
-
-const WHITE_NOTES: [u8; 75] = [
-    000, 002, 004, 005, 007, 009, 011, 012, 014, 016, 017, 019, 021, 023, 024, 026, 028, 029, 031,
-    033, 035, 036, 038, 040, 041, 043, 045, 047, 048, 050, 052, 053, 055, 057, 059, 060, 062, 064,
-    065, 067, 069, 071, 072, 074, 076, 077, 079, 081, 083, 084, 086, 088, 089, 091, 093, 095, 096,
-    098, 100, 101, 103, 105, 107, 108, 110, 112, 113, 115, 117, 119, 120, 122, 124, 125, 127,
-];
-const BLACK_NOTES: [u8; 53] = [
-    001, 003, 006, 008, 010, 013, 015, 018, 020, 022, 025, 027, 030, 032, 034, 037, 039, 042, 044,
-    046, 049, 051, 054, 056, 058, 061, 063, 066, 068, 070, 073, 075, 078, 080, 082, 085, 087, 090,
-    092, 094, 097, 099, 102, 104, 106, 109, 111, 114, 116, 118, 121, 123, 126,
-];
+use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 
 const WHITE_ZOOM_LEVELS: [u8; 5] = [20, 24, 28, 34, 40];
 
@@ -69,6 +57,8 @@ const COLOR_WHITE: Color = Color::from_rgb(0.85, 0.85, 0.85);
 const COLOR_BLACK: Color = Color::from_rgb(0.2, 0.2, 0.2);
 const COLOR_PRESSED: Color = Color::from_rgb(0.4, 0.7, 1.0);
 const COLOR_BORDER: Color = Color::BLACK;
+const COLOR_BAR_BG: Color = Color::WHITE;
+const COLOR_BAR_HIGHLIGHT: Color = Color::from_rgb(1.0, 0.0, 0.0);
 
 const NUM_WHITE_KEYS: u8 = 75;
 const NUM_BLACK_KEYS: u8 = 53;
@@ -182,46 +172,6 @@ fn visible_white_keys<'a>(
     })
 }
 
-fn draw_piano(
-    frame: &mut Frame,
-    pressed_keys: &[bool; 128],
-    center_note: u8,
-    note_width: u8,
-    bounds: Rectangle,
-) {
-    frame.fill(
-        &Path::rectangle(bounds.position(), bounds.size()),
-        COLOR_BORDER,
-    );
-
-    let sizes = Sizes::from_white(note_width);
-    let origin = compute_origin(bounds.center_x(), center_note, &sizes);
-
-    for key in visible_white_keys(&sizes, origin, &bounds) {
-        let color = if pressed_keys[key.note as usize] {
-            COLOR_PRESSED
-        } else {
-            COLOR_WHITE
-        };
-        frame.fill(
-            &Path::rectangle(key.rect.position(), key.rect.size()),
-            color,
-        );
-    }
-
-    for key in visible_black_keys(&sizes, origin, &bounds) {
-        let color = if pressed_keys[key.note as usize] {
-            COLOR_PRESSED
-        } else {
-            COLOR_BLACK
-        };
-        frame.fill(
-            &Path::rectangle(key.rect.position(), key.rect.size()),
-            color,
-        );
-    }
-}
-
 /// Returns the note under `point` (canvas-local coordinates), if any.
 /// Checks black keys first since they're drawn on top of white keys —
 /// same visible set, same rects, as `draw_piano` used to paint them.
@@ -235,28 +185,6 @@ fn hit_test_piano(point: Point, center_note: u8, note_width: u8, bounds: Rectang
         .map(|key| key.note)
 }
 
-// Returns the visual index of a white key (ignores black keys).
-fn white_index(n: u8) -> f32 {
-    let octave = n / 12;
-    let note = n % 12;
-    let offsets = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
-    (octave as f32 * 7.0) + offsets[note as usize] as f32
-}
-
-fn is_black(n: u8) -> bool {
-    matches!(n % 12, 1 | 3 | 6 | 8 | 10)
-}
-
-// Calculates the mathematical center X coordinate of any MIDI note
-fn center_x(n: u8, white_key_width: f32) -> f32 {
-    if is_black(n) {
-        // Black keys visually sit exactly on the boundary of the adjacent white keys
-        (white_index(n) + 1.0) * white_key_width
-    } else {
-        white_index(n) * white_key_width + white_key_width / 2.0
-    }
-}
-
 pub struct KeyboardProgram<'a, Message> {
     pub note_width: u8,
     pub pressed_keys: &'a [bool; 128],
@@ -265,7 +193,7 @@ pub struct KeyboardProgram<'a, Message> {
     pub on_note_clicked: Box<dyn Fn(u8) -> Message + 'a>,
 }
 
-const BOTTOM_BAR_HEIGHT: f32 = 0.0;
+const BOTTOM_BAR_HEIGHT: f32 = 8.0;
 
 impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
     type State = ();
@@ -307,24 +235,113 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
         _state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
-        bounds: Rectangle,
+        raw_bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
+        let sizes = Sizes::from_white(self.note_width);
 
-        draw_piano(
-            &mut frame,
-            &self.pressed_keys,
-            self.root_note,
-            self.note_width,
-            // a frame uses local coordinates, not global coordinates
-            Rectangle {
-                x: 0.0,
-                y: 0.0,
-                width: bounds.width,
-                height: bounds.height - BOTTOM_BAR_HEIGHT,
-            },
+        let mut frame = Frame::new(renderer, raw_bounds.size());
+        // frame uses local coordinates, not global coordinates
+        let rect_all = Rectangle::new(Point::ORIGIN, raw_bounds.size());
+        let rect_keys = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: raw_bounds.width,
+            height: raw_bounds.height - BOTTOM_BAR_HEIGHT,
+        };
+        let rect_bar = Rectangle {
+            x: 0.0,
+            y: raw_bounds.height - BOTTOM_BAR_HEIGHT,
+            width: raw_bounds.width,
+            height: BOTTOM_BAR_HEIGHT,
+        };
+
+        // fill whole area for easy border
+        frame.fill(
+            &Path::rectangle(rect_all.position(), rect_all.size()),
+            COLOR_BORDER,
         );
+
+        let origin = compute_origin(rect_keys.center_x(), self.root_note, &sizes);
+
+        // draw piano keyboard whites
+        for key in visible_white_keys(&sizes, origin, &rect_keys) {
+            let color = if self.pressed_keys[key.note as usize] {
+                COLOR_PRESSED
+            } else {
+                COLOR_WHITE
+            };
+            frame.fill(
+                &Path::rectangle(key.rect.position(), key.rect.size()),
+                color,
+            );
+        }
+
+        // draw piano keyboard blacks
+        for key in visible_black_keys(&sizes, origin, &rect_keys) {
+            let color = if self.pressed_keys[key.note as usize] {
+                COLOR_PRESSED
+            } else {
+                COLOR_BLACK
+            };
+            frame.fill(
+                &Path::rectangle(key.rect.position(), key.rect.size()),
+                color,
+            );
+        }
+
+        // draw bottom indicator
+        {
+            // bg of the indicator
+            let bounding_rect = {
+                let leftmost =
+                    white_key_rect(const { 60 / 12 * 7 - 7 }, &sizes, origin, &rect_keys);
+                let rightmost =
+                    white_key_rect(const { 60 / 12 * 7 + 7 }, &sizes, origin, &rect_keys);
+                Rectangle {
+                    x: leftmost.x,
+                    y: rect_bar.y,
+                    width: rightmost.x + rightmost.width - leftmost.x,
+                    height: rect_bar.height,
+                }
+            };
+            frame.fill(
+                &Path::rectangle(
+                    Point {
+                        x: bounding_rect.x + 1.0,
+                        y: bounding_rect.y,
+                    },
+                    Size {
+                        width: bounding_rect.width - 1.0,
+                        height: bounding_rect.height - 1.0,
+                    },
+                ),
+                COLOR_BAR_BG,
+            );
+
+            // the actual center indicator
+            let width = match self.root_note % 12 {
+                // black note
+                1 | 3 | 6 | 8 | 10 => sizes.black,
+                // white note
+                _ => sizes.white,
+            };
+            let indicator_inner_rect = Rectangle {
+                x: (rect_all.center_x() - width / 2.0).round(),
+                y: bounding_rect.y,
+                width: width - 1.0,
+                height: bounding_rect.height - 1.0,
+            };
+            let indicator_outer_rect = indicator_inner_rect.expand(1.0);
+            frame.fill(
+                &Path::rectangle(indicator_outer_rect.position(), indicator_outer_rect.size()),
+                COLOR_BORDER,
+            );
+            frame.fill(
+                &Path::rectangle(indicator_inner_rect.position(), indicator_inner_rect.size()),
+                COLOR_BAR_HIGHLIGHT,
+            );
+        }
 
         vec![frame.into_geometry()]
     }
