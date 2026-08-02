@@ -16,7 +16,7 @@ const BLACK_NOTES: [u8; 53] = [
 
 const WHITE_ZOOM_LEVELS: [u8; 5] = [20, 24, 28, 34, 40];
 
-/// Amounts are in pixels
+/// Amounts are in logical pixels
 #[derive(Debug)]
 struct Sizes {
     white: f32,
@@ -70,25 +70,39 @@ const COLOR_BLACK: Color = Color::from_rgb(0.2, 0.2, 0.2);
 const COLOR_PRESSED: Color = Color::from_rgb(0.4, 0.7, 1.0);
 const COLOR_BORDER: Color = Color::BLACK;
 
-fn draw_piano(
-    frame: &mut Frame,
-    pressed_keys: &[bool; 128],
-    center_note: u8,
-    note_width: u8,
-    bounds: Rectangle,
-) {
-    // fill whole frame black for a simple border
-    frame.fill(
-        &Path::rectangle(bounds.position(), bounds.size()),
-        COLOR_BORDER,
-    );
+const NUM_WHITE_KEYS: u8 = 75;
+const NUM_BLACK_KEYS: u8 = 53;
 
-    let sizes = Sizes::from_white(note_width);
+const fn white_idx_to_note(idx: u8) -> u8 {
+    ((idx / 7) * 12)
+        + match idx % 7 {
+            0 => 0,
+            1 => 2,
+            2 => 4,
+            3 => 5,
+            4 => 7,
+            5 => 9,
+            6 => 11,
+            _ => unreachable!(),
+        }
+}
 
-    let center_x = bounds.center_x();
+const fn black_idx_to_note(idx: u8) -> u8 {
+    ((idx / 5) * 12)
+        + match idx % 5 {
+            0 => 1,
+            1 => 3,
+            2 => 6,
+            3 => 8,
+            4 => 10,
+            _ => unreachable!(),
+        }
+}
 
-    // find top-left x position of note 0
-    let origin: f32 = match center_note % 12 {
+/// x position of the top-left corner of white key idx 0, such that
+/// `center_note` is centered at `center_x`.
+fn compute_origin(center_x: f32, center_note: u8, sizes: &Sizes) -> f32 {
+    match center_note % 12 {
         // center note is black
         1 => center_x + sizes.cd_offset - sizes.white * (center_note / 12 * 7 + 1) as f32,
         3 => center_x - sizes.cd_offset - sizes.white * (center_note / 12 * 7 + 2) as f32,
@@ -105,96 +119,120 @@ fn draw_piano(
         11 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 6) as f32,
         _ => unreachable!(),
     }
-    .round();
+    .round()
+}
 
-    // loop visible white notes ("idx" does not count black notes, so only 75 white notes in total)
-    const fn white_idx_to_note(idx: u8) -> u8 {
-        ((idx / 7) * 12)
-            + match idx % 7 {
-                0 => 0,
-                1 => 2,
-                2 => 4,
-                3 => 5,
-                4 => 7,
-                5 => 9,
-                6 => 11,
-                _ => unreachable!(),
-            }
-    }
-    let white_idx_min = ((bounds.x - origin) / sizes.white).floor().clamp(0.0, 75.0) as u8;
-    let white_idx_max = ((bounds.x - origin + bounds.width) / sizes.white)
-        .ceil()
-        .clamp(0.0, 75.0) as u8;
-    for draw_idx in white_idx_min..white_idx_max {
-        let draw_rect = Path::rectangle(
-            Point::new(origin + sizes.white * draw_idx as f32, bounds.y),
-            Size::new(sizes.white - 1.0, bounds.height - 1.0), // `- 1.0` for a border
-        );
-        let color = if pressed_keys[white_idx_to_note(draw_idx) as usize] {
+fn white_key_rect(idx: u8, sizes: &Sizes, origin: f32, bounds: &Rectangle) -> Rectangle {
+    Rectangle::new(
+        Point::new(origin + sizes.white * idx as f32, bounds.y),
+        Size::new(sizes.white - 1.0, bounds.height - 1.0), // `- 1.0` for a border
+    )
+}
+
+fn black_key_rect(idx: u8, sizes: &Sizes, origin: f32, bounds: &Rectangle) -> Rectangle {
+    let left_x = origin
+        + ((idx / 5) as f32 * sizes.white * 7.0)
+        + match idx % 5 {
+            0 => sizes.white * 1.0 - sizes.black / 2.0 - sizes.cd_offset,
+            1 => sizes.white * 2.0 - sizes.black / 2.0 + sizes.cd_offset,
+            2 => sizes.white * 4.0 - sizes.black / 2.0 - sizes.fa_offset,
+            3 => sizes.white * 5.0 - sizes.black / 2.0,
+            4 => sizes.white * 6.0 - sizes.black / 2.0 + sizes.fa_offset,
+            _ => unreachable!(),
+        };
+    Rectangle::new(
+        Point::new(left_x, bounds.y),
+        Size::new(sizes.black, (bounds.height * 0.6).round()),
+    )
+}
+
+/// Geometry of a single key, in the same coordinate space as `bounds`.
+struct KeyGeometry {
+    note: u8,
+    rect: Rectangle,
+}
+
+/// Every black key visible within `bounds`. No index-range math — just
+/// generate all 53 and keep the ones that overlap.
+fn visible_black_keys<'a>(
+    sizes: &'a Sizes,
+    origin: f32,
+    bounds: &'a Rectangle,
+) -> impl Iterator<Item = KeyGeometry> + 'a {
+    (0..NUM_BLACK_KEYS).filter_map(move |idx| {
+        let rect = black_key_rect(idx, sizes, origin, bounds);
+        rect.intersects(bounds).then(|| KeyGeometry {
+            note: black_idx_to_note(idx),
+            rect,
+        })
+    })
+}
+
+fn visible_white_keys<'a>(
+    sizes: &'a Sizes,
+    origin: f32,
+    bounds: &'a Rectangle,
+) -> impl Iterator<Item = KeyGeometry> + 'a {
+    (0..NUM_WHITE_KEYS).filter_map(move |idx| {
+        let rect = white_key_rect(idx, sizes, origin, bounds);
+        rect.intersects(bounds).then(|| KeyGeometry {
+            note: white_idx_to_note(idx),
+            rect,
+        })
+    })
+}
+
+fn draw_piano(
+    frame: &mut Frame,
+    pressed_keys: &[bool; 128],
+    center_note: u8,
+    note_width: u8,
+    bounds: Rectangle,
+) {
+    frame.fill(
+        &Path::rectangle(bounds.position(), bounds.size()),
+        COLOR_BORDER,
+    );
+
+    let sizes = Sizes::from_white(note_width);
+    let origin = compute_origin(bounds.center_x(), center_note, &sizes);
+
+    for key in visible_white_keys(&sizes, origin, &bounds) {
+        let color = if pressed_keys[key.note as usize] {
             COLOR_PRESSED
         } else {
             COLOR_WHITE
         };
-        frame.fill(&draw_rect, color);
+        frame.fill(
+            &Path::rectangle(key.rect.position(), key.rect.size()),
+            color,
+        );
     }
 
-    // loop visible black notes ("idx" does not count white notes, so only 53 black notes in total)
-    const fn black_idx_to_note(idx: u8) -> u8 {
-        ((idx / 5) * 12)
-            + match idx % 5 {
-                0 => 1,
-                1 => 3,
-                2 => 6,
-                3 => 8,
-                4 => 10,
-                _ => unreachable!(),
-            }
-    }
-    let black_idx_min = white_idx_min / 7 * 5
-        + match white_idx_min % 7 {
-            0 => 0,
-            1 => 0,
-            2 => 1,
-            3 => 2,
-            4 => 2,
-            5 => 3,
-            6 => 4,
-            _ => unreachable!(),
-        };
-    let black_idx_max = white_idx_max / 7 * 5
-        + match white_idx_max % 7 {
-            0 => 0,
-            1 => 1,
-            2 => 1,
-            3 => 2,
-            4 => 3,
-            5 => 4,
-            6 => 4,
-            _ => unreachable!(),
-        }
-        .min(52);
-    for draw_idx in black_idx_min..black_idx_max {
-        let draw_x = origin
-            + ((draw_idx / 5) as f32 * sizes.white * 7.0)
-            + match draw_idx % 5 {
-                0 => sizes.white * 1.0 - sizes.black / 2.0 - sizes.cd_offset,
-                1 => sizes.white * 2.0 - sizes.black / 2.0 + sizes.cd_offset,
-                2 => sizes.white * 4.0 - sizes.black / 2.0 - sizes.fa_offset,
-                3 => sizes.white * 5.0 - sizes.black / 2.0 + 0.0,
-                4 => sizes.white * 6.0 - sizes.black / 2.0 + sizes.fa_offset,
-                _ => unreachable!(),
-            };
-        let draw_rect = Path::rectangle(
-            Point::new(draw_x, bounds.y),
-            Size::new(sizes.black, (bounds.height * 0.6).round()),
-        );
-        let color = if pressed_keys[dbg!(black_idx_to_note(draw_idx)) as usize] {
+    for key in visible_black_keys(&sizes, origin, &bounds) {
+        let color = if pressed_keys[key.note as usize] {
             COLOR_PRESSED
         } else {
             COLOR_BLACK
         };
-        frame.fill(&draw_rect, color);
+        frame.fill(
+            &Path::rectangle(key.rect.position(), key.rect.size()),
+            color,
+        );
     }
+}
+
+/// Returns the note under `point` (canvas-local coordinates), if any.
+/// Checks black keys first since they're drawn on top of white keys —
+/// same visible set, same rects, as `draw_piano` used to paint them.
+fn hit_test_piano(point: Point, center_note: u8, note_width: u8, bounds: Rectangle) -> Option<u8> {
+    let sizes = Sizes::from_white(note_width);
+    let origin = compute_origin(bounds.center_x(), center_note, &sizes);
+
+    visible_black_keys(&sizes, origin, &bounds)
+        .chain(visible_white_keys(&sizes, origin, &bounds))
+        .find(|key| key.rect.contains(point))
+        .map(|key| key.note)
 }
 
 // Returns the visual index of a white key (ignores black keys).
