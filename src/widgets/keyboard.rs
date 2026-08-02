@@ -14,247 +14,7 @@ const BLACK_NOTES: [u8; 53] = [
     092, 094, 097, 099, 102, 104, 106, 109, 111, 114, 116, 118, 121, 123, 126,
 ];
 
-fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
-    let sizes = Sizes::from_white(note_width);
-
-    let center_x = bounds.x + bounds.width / 2.0;
-
-    // black notes are slightly off-center, find their X offset
-    let black_x_offset = match center_note % 12 {
-        1 => -sizes.cd_offset,
-        3 => sizes.cd_offset,
-        6 => -sizes.fa_offset,
-        8 => 0.0,
-        10 => sizes.fa_offset,
-        _ => 0.0,
-    };
-
-    match WHITE_NOTES.binary_search(&center_note) {
-        Ok(center_idx) => {
-            // find top-left x position of note 0
-            // we are centered on a white note, there are `i` additional notes to our left
-            let origin: f32 =
-                (center_x - sizes.white / 2.0 - sizes.white * center_idx as f32).round();
-
-            // loop visible white notes ("idx" does not count black notes, so only 75 white notes in total)
-            const fn white_idx_to_note(idx: u8) -> u8 {
-                ((idx / 7) * 12)
-                    + match idx % 7 {
-                        0 => 0,
-                        1 => 2,
-                        2 => 4,
-                        3 => 5,
-                        4 => 7,
-                        5 => 9,
-                        6 => 11,
-                        _ => unreachable!(),
-                    }
-            }
-            let white_idx_min = ((bounds.x - origin) / sizes.white).floor().clamp(0.0, 75.0) as u8;
-            let white_idx_max = ((bounds.x - origin + bounds.width) / sizes.white)
-                .ceil()
-                .clamp(0.0, 75.0) as u8;
-            for draw_idx in white_idx_min..white_idx_max {
-                let draw_rect = Path::rectangle(
-                    Point::new(origin + sizes.white * draw_idx as f32, bounds.y),
-                    Size::new(sizes.white, bounds.height),
-                );
-            }
-
-            // loop visible black notes ("idx" does not count white notes, so only 53 black notes in total)
-            let black_idx_min = white_idx_min / 7 * 5
-                + match white_idx_min % 7 {
-                    0 => 0,
-                    1 => 0,
-                    2 => 1,
-                    3 => 2,
-                    4 => 2,
-                    5 => 3,
-                    6 => 4,
-                    _ => unreachable!(),
-                };
-            let black_idx_max = white_idx_max / 7 * 5
-                + match white_idx_max % 7 {
-                    0 => 0,
-                    1 => 1,
-                    2 => 1,
-                    3 => 2,
-                    4 => 3,
-                    5 => 4,
-                    6 => 4,
-                    _ => unreachable!(),
-                };
-            for draw_idx in black_idx_min..black_idx_max {
-                let draw_x = origin
-                    + ((draw_idx / 5) as f32 * sizes.white * 7.0)
-                    + match draw_idx % 5 {
-                        0 => sizes.white * 1.0 - sizes.black / 2.0 - sizes.cd_offset,
-                        1 => sizes.white * 2.0 - sizes.black / 2.0 + sizes.cd_offset,
-                        2 => sizes.white * 4.0 - sizes.black / 2.0 - sizes.fa_offset,
-                        3 => sizes.white * 5.0 - sizes.black / 2.0 + 0.0,
-                        4 => sizes.white * 6.0 - sizes.black / 2.0 + sizes.fa_offset,
-                        _ => unreachable!(),
-                    };
-                let draw_rect = Path::rectangle(
-                    Point::new(draw_x, bounds.y),
-                    Size::new(sizes.black, (bounds.height * 0.6).round()),
-                );
-            }
-        }
-        Err(i) => {
-            // find top-left x position of note 0
-            // we are centered on a black note, there are `i` white notes to our left
-            let origin: f32 = (center_x - black_x_offset - sizes.white * i as f32).round();
-
-            // // how many white notes are visible to the left/right of our centered note?
-            // let additional_white_notes_per_side =
-            //     ((bounds.width / 2.0 - sizes.white / 2.0) / sizes.white).ceil() as usize;
-
-            // // loop visible white notes
-            // let white_min_idx = center_idx
-            //     .checked_sub(additional_white_notes_per_side)
-            //     .unwrap_or(0);
-            // let white_max_idx =
-            //     (center_idx + additional_white_notes_per_side).min(WHITE_NOTES.len() - 1);
-            // for draw_idx in white_min_idx..=white_max_idx {
-            //     let draw_note = WHITE_NOTES[draw_idx];
-            //     let draw_rect = Path::rectangle(
-            //         Point::new(origin + sizes.white * draw_idx as f32, bounds.y),
-            //         Size::new(sizes.white, bounds.height),
-            //     );
-            // }
-
-            // // loop visible black notes
-            // let black_min_note = WHITE_NOTES[white_min_idx]
-            //     .checked_sub(1)
-            //     .unwrap_or(1)
-            //     .max(1);
-            // let black_max_note = (WHITE_NOTES[white_max_idx] + 1).max(126);
-            // for draw_note in black_min_note..=black_max_note {
-            //     let draw_x = match draw_note % 12 {
-            //         1 => {
-            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 1.0
-            //                 - sizes.black / 2.0
-            //                 - sizes.cd_offset
-            //         }
-            //         3 => {
-            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 2.0
-            //                 - sizes.black / 2.0
-            //                 + sizes.cd_offset
-            //         }
-            //         6 => {
-            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 4.0
-            //                 - sizes.black / 2.0
-            //                 - sizes.fa_offset
-            //         }
-            //         8 => {
-            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 5.0
-            //                 - sizes.black / 2.0
-            //                 + 0.0
-            //         }
-            //         10 => {
-            //             origin + (draw_note / 12) as f32 * sizes.white * 7.0 + sizes.white * 6.0
-            //                 - sizes.black / 2.0
-            //                 + sizes.fa_offset
-            //         }
-            //         // skip non-black note
-            //         _ => continue,
-            //     };
-            //     let draw_rect = Path::rectangle(
-            //         Point::new(draw_x, bounds.y),
-            //         Size::new(sizes.black, bounds.height * 0.6),
-            //     );
-            // }
-        }
-    }
-
-    // draw visible white notes
-
-    // let extend_bounds_by = ((window_width / note_width).ceil() / 2.0).ceil() as usize + 1;
-    // let (white_min, white_max) = match WHITE_NOTES.binary_search(&center_note) {
-    //     Ok(i) => {
-    //         // we are centered on a white note
-    //         let white_min = i.checked_sub(extend_bounds_by).unwrap_or(0);
-    //         let white_max = (i + extend_bounds_by).min(WHITE_NOTES.len() - 1);
-    //         (white_min, white_max)
-    //     },
-    //     Err(i) => {
-    //         // we are centered on a black note
-    //         let white_min = i.checked_sub(extend_bounds_by + 1).unwrap_or(0);
-    //         let white_max = (i + extend_bounds_by).min(WHITE_NOTES.len() - 1);
-    //         (white_min, white_max)
-    //     },
-    // };
-    // let visible_white_notes = window_width / note_width + 4.0; // extend visible range by 4 notes
-    todo!()
-}
-
-// /// For simplicity, this renders extra notes on each side to ensure black notes are rendered correctly
-// fn visible_note_range(center_note: u8, note_width: u8, window_width: f32) {
-//     debug_assert!(center_note <= 127, "center note must be within 0..=127: {center_note}");
-//     // debug_assert!(note_width > 0.0, "note width must be larger than 0.0: {note_width}");
-//     debug_assert!(window_width > 0.0, "window width must be larger than 0.0: {window_width}");
-
-//     let sizes = Sizes::from_white(note_width);
-//     match center_note % 12 {
-
-//     }
-
-//     // find top-left x position of note 0
-
-//     // let extend_bounds_by = ((window_width / note_width).ceil() / 2.0).ceil() as usize + 1;
-//     // let (white_min, white_max) = match WHITE_NOTES.binary_search(&center_note) {
-//     //     Ok(i) => {
-//     //         // we are centered on a white note
-//     //         let white_min = i.checked_sub(extend_bounds_by).unwrap_or(0);
-//     //         let white_max = (i + extend_bounds_by).min(WHITE_NOTES.len() - 1);
-//     //         (white_min, white_max)
-//     //     },
-//     //     Err(i) => {
-//     //         // we are centered on a black note
-//     //         let white_min = i.checked_sub(extend_bounds_by + 1).unwrap_or(0);
-//     //         let white_max = (i + extend_bounds_by).min(WHITE_NOTES.len() - 1);
-//     //         (white_min, white_max)
-//     //     },
-//     // };
-//     // let visible_white_notes = window_width / note_width + 4.0; // extend visible range by 4 notes
-//     todo!()
-// }
-
 const WHITE_ZOOM_LEVELS: [u8; 5] = [20, 24, 28, 34, 40];
-
-#[repr(u8)]
-enum Pitch {
-    C = 0,
-    CS = 1,
-    D = 2,
-    DS = 3,
-    E = 4,
-    F = 5,
-    FS = 6,
-    G = 7,
-    GS = 8,
-    A = 9,
-    AS = 10,
-    B = 11,
-}
-impl Pitch {
-    const fn is_black(&self) -> bool {
-        matches!(self, Self::CS | Self::DS | Self::FS | Self::GS | Self::AS)
-    }
-}
-
-struct Note {
-    octave: u8,
-    pitch: Pitch,
-}
-impl Note {
-    const fn parse(note: u8) -> Self {
-        let octave = note / 12;
-        let pitch: Pitch = unsafe { std::mem::transmute(note % 12) };
-        Self { octave, pitch }
-    }
-}
 
 /// Amounts are in pixels
 #[derive(Debug)]
@@ -305,6 +65,85 @@ mod tests {
     }
 }
 
+fn visible_note_range(center_note: u8, note_width: u8, bounds: Rectangle) {
+    let sizes = Sizes::from_white(note_width);
+
+    let center_x = bounds.x + bounds.width / 2.0;
+
+    // find top-left x position of note 0
+    let origin: f32 = match center_note % 12 {
+        // center note is black
+        1 => center_x + sizes.cd_offset - sizes.white * (center_note / 12 * 7 + 1) as f32,
+        3 => center_x - sizes.cd_offset - sizes.white * (center_note / 12 * 7 + 2) as f32,
+        6 => center_x + sizes.fa_offset - sizes.white * (center_note / 12 * 7 + 4) as f32,
+        8 => center_x + 0.0000000000000 - sizes.white * (center_note / 12 * 7 + 5) as f32,
+        10 => center_x - sizes.fa_offset - sizes.white * (center_note / 12 * 7 + 6) as f32,
+        // center note is white
+        0 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 0) as f32,
+        2 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 1) as f32,
+        4 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 2) as f32,
+        5 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 3) as f32,
+        7 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 4) as f32,
+        9 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 5) as f32,
+        11 => center_x - sizes.white / 2.0 - sizes.white * (center_note / 12 * 7 + 6) as f32,
+        _ => unreachable!(),
+    }
+    .round();
+
+    // loop visible white notes ("idx" does not count black notes, so only 75 white notes in total)
+    let white_idx_min = ((bounds.x - origin) / sizes.white).floor().clamp(0.0, 75.0) as u8;
+    let white_idx_max = ((bounds.x - origin + bounds.width) / sizes.white)
+        .ceil()
+        .clamp(0.0, 75.0) as u8;
+    for draw_idx in white_idx_min..white_idx_max {
+        let draw_rect = Path::rectangle(
+            Point::new(origin + sizes.white * draw_idx as f32, bounds.y),
+            Size::new(sizes.white, bounds.height),
+        );
+    }
+
+    // loop visible black notes ("idx" does not count white notes, so only 53 black notes in total)
+    let black_idx_min = white_idx_min / 7 * 5
+        + match white_idx_min % 7 {
+            0 => 0,
+            1 => 0,
+            2 => 1,
+            3 => 2,
+            4 => 2,
+            5 => 3,
+            6 => 4,
+            _ => unreachable!(),
+        };
+    let black_idx_max = white_idx_max / 7 * 5
+        + match white_idx_max % 7 {
+            0 => 0,
+            1 => 1,
+            2 => 1,
+            3 => 2,
+            4 => 3,
+            5 => 4,
+            6 => 4,
+            _ => unreachable!(),
+        };
+    for draw_idx in black_idx_min..black_idx_max {
+        let draw_x = origin
+            + ((draw_idx / 5) as f32 * sizes.white * 7.0)
+            + match draw_idx % 5 {
+                0 => sizes.white * 1.0 - sizes.black / 2.0 - sizes.cd_offset,
+                1 => sizes.white * 2.0 - sizes.black / 2.0 + sizes.cd_offset,
+                2 => sizes.white * 4.0 - sizes.black / 2.0 - sizes.fa_offset,
+                3 => sizes.white * 5.0 - sizes.black / 2.0 + 0.0,
+                4 => sizes.white * 6.0 - sizes.black / 2.0 + sizes.fa_offset,
+                _ => unreachable!(),
+            };
+        let draw_rect = Path::rectangle(
+            Point::new(draw_x, bounds.y),
+            Size::new(sizes.black, (bounds.height * 0.6).round()),
+        );
+    }
+    todo!()
+}
+
 // Returns the visual index of a white key (ignores black keys).
 fn white_index(n: u8) -> f32 {
     let octave = n / 12;
@@ -326,6 +165,10 @@ fn center_x(n: u8, white_key_width: f32) -> f32 {
         white_index(n) * white_key_width + white_key_width / 2.0
     }
 }
+
+const COLOR_WHITE: Color = Color::from_rgb(0.85, 0.85, 0.85);
+const COLOR_BLACK: Color = Color::from_rgb(0.2, 0.2, 0.2);
+const COLOR_PRESSED: Color = Color::from_rgb(0.4, 0.7, 1.0);
 
 pub struct KeyboardProgram<'a, Message> {
     pub pressed_keys: &'a [bool; 128],
@@ -412,11 +255,6 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
 
         let offset_x = (bounds.width / 2.0) - center_x(self.root_note, white_key_width);
 
-        let unpressed_white = Color::from_rgb(0.85, 0.85, 0.85);
-        let unpressed_black = Color::from_rgb(0.2, 0.2, 0.2);
-        // Using a distinct blue for live pressed notes so it doesn't clash with the red root note
-        let pressed_color = Color::from_rgb(0.4, 0.7, 1.0);
-
         // Draw a black background. This easily creates the 1px black outline between keys!
         frame.fill(&Path::rectangle(Point::ORIGIN, bounds.size()), Color::BLACK);
 
@@ -431,9 +269,9 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
                 }
 
                 let color = if self.pressed_keys[n as usize] {
-                    pressed_color
+                    COLOR_PRESSED
                 } else {
-                    unpressed_white
+                    COLOR_WHITE
                 };
 
                 // Shrinking the width by 1.0 creates a natural black border from the background
@@ -454,9 +292,9 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
                 }
 
                 let color = if self.pressed_keys[n as usize] {
-                    pressed_color
+                    COLOR_PRESSED
                 } else {
-                    unpressed_black
+                    COLOR_BLACK
                 };
 
                 let path = Path::rectangle(
