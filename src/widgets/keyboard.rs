@@ -258,11 +258,14 @@ fn center_x(n: u8, white_key_width: f32) -> f32 {
 }
 
 pub struct KeyboardProgram<'a, Message> {
+    pub note_width: u8,
     pub pressed_keys: &'a [bool; 128],
     pub root_note: u8,
     // Callback to emit messages generically when a key is clicked
     pub on_note_clicked: Box<dyn Fn(u8) -> Message + 'a>,
 }
+
+const BOTTOM_BAR_HEIGHT: f32 = 0.0;
 
 impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
     type State = ();
@@ -278,47 +281,22 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
             event
             && let Some(position) = cursor.position_in(bounds)
         {
-            let white_key_width = 26.0;
-            let black_key_width = 14.0;
-            let bottom_bar_height = 20.0;
-            let keys_height = bounds.height - bottom_bar_height;
-            let black_key_height = keys_height * 0.6;
-
-            // How much we need to shift the keyboard to center the root note
-            let offset_x = (bounds.width / 2.0) - center_x(self.root_note, white_key_width);
-
-            // Adjust position relative to note 0
-            let relative_x = position.x - offset_x;
-            let y = position.y;
-
-            if y < keys_height {
-                // 1. Check black keys first (they are physically drawn on top)
-                if y < black_key_height {
-                    for n in 0..128 {
-                        if is_black(n) {
-                            let cx = center_x(n, white_key_width);
-                            if relative_x >= cx - black_key_width / 2.0
-                                && relative_x <= cx + black_key_width / 2.0
-                            {
-                                return Some(
-                                    Action::publish((self.on_note_clicked)(n)).and_capture(),
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // 2. Check white keys if no black key was clicked
-                for n in 0..128 {
-                    if !is_black(n) {
-                        let cx = center_x(n, white_key_width);
-                        if relative_x >= cx - white_key_width / 2.0
-                            && relative_x <= cx + white_key_width / 2.0
-                        {
-                            return Some(Action::publish((self.on_note_clicked)(n)).and_capture());
-                        }
-                    }
-                }
+            let clicked_note = hit_test_piano(
+                position,
+                self.root_note,
+                self.note_width,
+                Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: bounds.width,
+                    height: bounds.height - BOTTOM_BAR_HEIGHT,
+                },
+            );
+            if let Some(clicked_note) = clicked_note
+                && ((60 - 12) <= clicked_note && clicked_note <= (60 + 12))
+            {
+                // only allow clicking between 1 octave of C4 (60)
+                return Some(Action::publish((self.on_note_clicked)(clicked_note)).and_capture());
             }
         }
         None
@@ -334,62 +312,19 @@ impl<'a, Message> Program<Message> for KeyboardProgram<'a, Message> {
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        let white_key_width = 24.0;
-        let black_key_width = 14.0;
-        let bottom_bar_height = 20.0;
-        let keys_height = bounds.height - bottom_bar_height;
-
-        let offset_x = (bounds.width / 2.0) - center_x(self.root_note, white_key_width);
-
         draw_piano(
             &mut frame,
             &self.pressed_keys,
             self.root_note,
-            white_key_width.round() as u8,
+            self.note_width,
             // a frame uses local coordinates, not global coordinates
             Rectangle {
                 x: 0.0,
                 y: 0.0,
                 width: bounds.width,
-                height: bounds.height - bottom_bar_height,
+                height: bounds.height - BOTTOM_BAR_HEIGHT,
             },
         );
-
-        // 3. Draw Bottom Indicator Bar
-        // (The background of the bar is already black from the base fill)
-
-        // Find the X boundaries of C4 +- 12 (root_note - 12 to root_note + 12)
-        let min_note = self.root_note.saturating_sub(12);
-        let max_note = self.root_note.saturating_add(12).min(127);
-
-        let min_cx = center_x(min_note, white_key_width) + offset_x;
-        let max_cx = center_x(max_note, white_key_width) + offset_x;
-
-        let span_left = if is_black(min_note) {
-            min_cx - black_key_width / 2.0
-        } else {
-            min_cx - white_key_width / 2.0
-        };
-        let span_right = if is_black(max_note) {
-            max_cx + black_key_width / 2.0
-        } else {
-            max_cx + white_key_width / 2.0
-        };
-
-        // Draw the white span range
-        let span_path = Path::rectangle(
-            Point::new(span_left, keys_height + 4.0),
-            Size::new(span_right - span_left, bottom_bar_height - 8.0),
-        );
-        frame.fill(&span_path, Color::WHITE);
-
-        // Draw the red root note indicator right in the center
-        let root_cx = center_x(self.root_note, white_key_width) + offset_x;
-        let root_path = Path::rectangle(
-            Point::new(root_cx - white_key_width / 2.0, keys_height + 4.0),
-            Size::new(white_key_width, bottom_bar_height - 8.0),
-        );
-        frame.fill(&root_path, Color::from_rgb(0.9, 0.1, 0.1));
 
         vec![frame.into_geometry()]
     }

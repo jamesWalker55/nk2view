@@ -179,7 +179,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
             },
             Message::RootNoteChanged(new_root) => {
                 println!("Root note changed to: {}", new_root);
-                state.scene.transpose = new_root;
+                state.scene.transpose = new_root + 4; // middle C is 60 in MIDI, but 64 in korg
 
                 let req =
                     crate::nk2::msg::load_scene_request(state.scene.midi_channel, &state.scene);
@@ -215,15 +215,16 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
     };
 
     let canvas = Canvas::new(KeyboardProgram {
+        note_width: 20,
         pressed_keys: match app.state {
             State::Connected(ref state) => &state.pressed_keys,
             State::Disconnected(_) => &const { [false; _] },
             State::FetchingScene { .. } => &const { [false; _] },
         },
         root_note: match app.state {
-            State::Connected(ref state) => state.scene.transpose,
-            State::Disconnected(_) => 64,
-            State::FetchingScene { .. } => 64,
+            State::Connected(ref state) => state.scene.transpose - 4,
+            State::Disconnected(_) => 60,
+            State::FetchingScene { .. } => 60,
         },
         on_note_clicked: Box::new(Message::RootNoteChanged),
     })
