@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use iced::futures::channel::mpsc::UnboundedSender;
 use iced::widget::canvas::Canvas;
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Task, alignment};
 
 use iced::futures::channel::mpsc;
@@ -238,9 +238,13 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
     container(
         column![
             canvas.height(Length::Fill),
-            button("reconnect").on_press(Message::ReconnectRequested)
+            row![
+                button("reconnect").on_press(Message::ReconnectRequested),
+                button("a").on_press(Message::ReconnectRequested),
+                button("b").on_press(Message::ReconnectRequested),
+                button("c").on_press(Message::ReconnectRequested),
+            ],
         ]
-        .spacing(30)
         .align_x(alignment::Alignment::Center),
     )
     .width(Length::Fill)
