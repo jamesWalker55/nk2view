@@ -21,6 +21,7 @@ pub fn main() -> iced::Result {
         .subscription(subscription)
         .antialiasing(true)
         .title("Live MIDI Keyboard Visualizer")
+        .window_size([364.0, 90.0])
         .run()
 }
 
