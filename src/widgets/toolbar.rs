@@ -154,16 +154,58 @@ fn build_channel_menu_button<'a>(current_ch: u8) -> Button<'a, Message> {
     )
     .padding(4.0)
     .width(Length::Shrink)
+    .on_press(Message::ToggleMenu(Menu::Channel))
 }
 
-fn build_velocity_curve_button<'a>(curve: VelocityCurve) -> Button<'a, Message> {
+fn build_velocity_curve_buttons<'a>(
+    curve: VelocityCurve,
+    const_velocity: u8,
+) -> Element<'a, Message> {
     let icon = match curve {
         VelocityCurve::Light => &*ICON_CURVE_LIGHT,
         VelocityCurve::Normal => &*ICON_CURVE_NORMAL,
         VelocityCurve::Heavy => &*ICON_CURVE_HEAVY,
         VelocityCurve::Const => &*ICON_CURVE_CONST,
     };
-    icon_button(icon)
+    let new_curve = match curve {
+        VelocityCurve::Light => VelocityCurve::Normal,
+        VelocityCurve::Normal => VelocityCurve::Heavy,
+        VelocityCurve::Heavy => VelocityCurve::Const,
+        VelocityCurve::Const => VelocityCurve::Light,
+    };
+    if curve == VelocityCurve::Const {
+        let menu = Menu::ConstantVelocity(format!("{const_velocity}"));
+        row![
+            minimal_button(
+                container(text(format!("V:")).size(12.0))
+                    .center_x(16.0)
+                    .center_y(16.0)
+            )
+            .padding(4.0)
+            .width(Length::Shrink)
+            .on_press(Message::SetVelocityCurve(new_curve)),
+            minimal_button(
+                container(text(format!("{const_velocity}")).size(12.0))
+                    .center_x(22.0)
+                    .center_y(16.0)
+            )
+            .padding(Padding {
+                top: 4.0,
+                right: 4.0,
+                bottom: 4.0,
+                left: 0.0
+            })
+            .width(Length::Shrink)
+            .on_press(Message::ToggleMenu(menu)),
+        ]
+        .into()
+    } else {
+        minimal_button(container(iced::widget::image(icon)))
+            .padding(4.0)
+            .width(Length::Shrink)
+            .on_press(Message::SetVelocityCurve(new_curve))
+            .into()
+    }
 }
 
 pub fn toolbar<'a>(
@@ -176,26 +218,11 @@ pub fn toolbar<'a>(
             icon_button(&*ICON_RECONNECT)
                 .on_press(Message::ReconnectRequested)
                 .into(),
-            build_channel_menu_button(active_ch)
-                .on_press(Message::ToggleMenu(Menu::Channel))
-                .into(),
+            build_channel_menu_button(active_ch).into(),
             icon_text_button(&*ICON_RECONNECT, "Reconnect")
                 .on_press(Message::ReconnectRequested)
                 .into(),
-            build_velocity_curve_button(curve)
-                .on_press(Message::SetVelocityCurve(match curve {
-                    VelocityCurve::Light => VelocityCurve::Normal,
-                    VelocityCurve::Normal => VelocityCurve::Heavy,
-                    VelocityCurve::Heavy => VelocityCurve::Const,
-                    VelocityCurve::Const => VelocityCurve::Light,
-                }))
-                .into(),
-            minimal_button(text(format!("{const_velocity}")).size(12.0))
-                .width(Length::Shrink)
-                .on_press(Message::ToggleMenu(Menu::ConstantVelocity(format!(
-                    "{const_velocity}"
-                ))))
-                .into(),
+            build_velocity_curve_buttons(curve, const_velocity).into(),
             icon_button(&*ICON_ZOOM_IN).on_press(Message::ZoomIn).into(),
             icon_button(&*ICON_ZOOM_OUT)
                 .on_press(Message::ZoomOut)
