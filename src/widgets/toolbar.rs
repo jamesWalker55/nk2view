@@ -97,7 +97,7 @@ pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
                     .center_x(Length::Fill)
                     .center_y(Length::Fill),
             )
-            .on_press(Message::ReconnectRequested)
+            .on_press(Message::SaveScene)
             .into(),
         ];
         row(items).width(Length::Fill).height(Length::Fill).into()

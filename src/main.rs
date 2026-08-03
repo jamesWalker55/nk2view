@@ -87,10 +87,10 @@ enum Message {
     KBEvent(KBEvent),
     /// A key is clicked
     RootNoteChanged(u8),
-    /// Refresh button pressed
+    // toolbar actions:
     ReconnectRequested,
-    /// Close popup button
     DismissPopup,
+    SaveScene,
 }
 
 fn boot() -> (Option<App>, Task<Message>) {
@@ -222,6 +222,12 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
             }
             Message::DismissPopup => {
                 state.popup = None;
+            }
+            Message::SaveScene => {
+                let req = crate::nk2::msg::save_scene_request(state.scene.midi_channel);
+                app.cmd_tx
+                    .unbounded_send(KBAction::Send(req))
+                    .expect("TODO: midi worker terminated unexpectedly");
             }
             Message::KBEvent(KBEvent::ConnectionEstablished) => {
                 unreachable!("should not receive ConnectionEstablished message")
