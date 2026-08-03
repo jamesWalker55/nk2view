@@ -50,7 +50,7 @@ const COLOR_TEXT: Color = Color::BLACK;
 const NUM_WHITE_KEYS: u8 = 75;
 const NUM_BLACK_KEYS: u8 = 53;
 
-const BOTTOM_BAR_HEIGHT: f32 = 8.0;
+const BOTTOM_BAR_HEIGHT: f32 = 4.0;
 
 /// The range of notes that respond to clicks, centered on middle C.
 /// `CLICKABLE_MIN_WHITE_IDX`/`MAX_WHITE_IDX` below are *derived* from these
