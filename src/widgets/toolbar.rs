@@ -68,6 +68,27 @@ fn icon_button<'a>(
     .on_press(msg)
 }
 
+fn icon_button_menu<'a>(
+    handle: impl Into<iced::widget::image::Handle>,
+    msg: Message,
+) -> iced::widget::Button<'a, Message> {
+    minimal_button(
+        row![
+            container(iced::widget::image(handle))
+                .center_x(16.0)
+                .center_y(16.0),
+            container(iced::widget::image(&*ICON_CARET_DOWN))
+                .center_x(8.0)
+                .center_y(6.0),
+        ]
+        .spacing(2.0)
+        .align_y(Vertical::Center),
+    )
+    .padding(4.0)
+    .width(Length::Shrink)
+    .on_press(msg)
+}
+
 fn icon_text_button<'a>(
     handle: impl Into<iced::widget::image::Handle>,
     content: impl IntoFragment<'a>,
@@ -112,12 +133,13 @@ icon!(ICON_CHANNEL, "fluent--midi-16-regular.png");
 icon!(ICON_SAVE, "fluent--save-16-regular.png");
 icon!(ICON_ZOOM_IN, "fluent--zoom-in-16-regular.png");
 icon!(ICON_ZOOM_OUT, "fluent--zoom-out-16-regular.png");
+icon!(ICON_CARET_DOWN, "fluent--caret-down-16-regular_CROP.png");
 
 pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
     responsive(|size| {
         let mut items = vec![
             icon_button(&*ICON_RECONNECT, Message::ReconnectRequested).into(),
-            icon_button(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
+            icon_button_menu(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
             icon_text_button(&*ICON_RECONNECT, "Reconnect", Message::ReconnectRequested).into(),
             icon_button(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
             icon_button(&*ICON_ZOOM_IN, Message::ZoomIn).into(),
