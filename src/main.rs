@@ -78,9 +78,10 @@ enum State {
     FetchingScene { _timeout_handle: iced::task::Handle },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Menu {
     Channel,
+    ConstantVelocity(String),
 }
 
 #[derive(Debug)]
@@ -114,6 +115,8 @@ enum Message {
     ZoomOut,
     SetChannel(u8),
     SetVelocityCurve(VelocityCurve),
+    InputVelocityValue(String),
+    SetVelocityValue(String),
     ToggleMenu(Menu),
 }
 
@@ -301,11 +304,31 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                     .expect("TODO: midi worker terminated unexpectedly");
             }
             Message::ToggleMenu(menu) => {
-                let is_same_menu = state.active_menu.map(|x| x == menu).unwrap_or(false);
-                if is_same_menu {
+                if state.active_menu.is_some() {
                     state.active_menu = None;
                 } else {
                     state.active_menu = Some(menu);
+                }
+            }
+            Message::InputVelocityValue(text) => {
+                if let Some(Menu::ConstantVelocity(..)) = state.active_menu {
+                    state.active_menu = Some(Menu::ConstantVelocity(text));
+                }
+            }
+            Message::SetVelocityValue(text) => {
+                state.active_menu = None;
+
+                let new_velocity: Result<u8, _> = text.parse();
+                if let Ok(new_velocity) = new_velocity
+                    && new_velocity <= 127
+                {
+                    state.scene.velocity_constant_value = new_velocity;
+
+                    let req =
+                        crate::nk2::msg::load_scene_request(state.scene.midi_channel, &state.scene);
+                    app.cmd_tx
+                        .unbounded_send(KBAction::Send(req))
+                        .expect("TODO: midi worker terminated unexpectedly");
                 }
             }
             Message::KBEvent(KBEvent::ConnectionEstablished) => {
@@ -353,9 +376,13 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
             column![
                 canvas.width(Length::Fill).height(Length::Fill),
                 if let State::Connected(state) = &app.state {
-                    widgets::toolbar::toolbar(state.scene.midi_channel, state.scene.velocity_curve)
+                    widgets::toolbar::toolbar(
+                        state.scene.midi_channel,
+                        state.scene.velocity_curve,
+                        state.scene.velocity_constant_value,
+                    )
                 } else {
-                    widgets::toolbar::toolbar(0, VelocityCurve::Normal)
+                    widgets::toolbar::toolbar(0, VelocityCurve::Normal, 100)
                 }
                 .into(),
             ]
@@ -369,6 +396,7 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
     let menu_ui = if let State::Connected(state) = &app.state {
         state
             .active_menu
+            .as_ref()
             .map(|menu| build_menu_ui(menu, state.scene.midi_channel))
     } else {
         None

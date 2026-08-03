@@ -2,7 +2,9 @@
 
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::text::IntoFragment;
-use iced::widget::{Space, button, column, container, responsive, row, space, text};
+use iced::widget::{
+    Button, Space, button, center, column, container, responsive, row, space, text, text_input,
+};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Pixels, Shadow, Task, alignment};
 
 use crate::nk2::scene::VelocityCurve;
@@ -134,7 +136,7 @@ icon!(ICON_CURVE_NORMAL, "line-straight.png");
 icon!(ICON_CURVE_HEAVY, "line-low.png");
 icon!(ICON_CURVE_CONST, "fluent--line-horizontal-1-16-regular.png");
 
-fn build_channel_menu_button<'a>(current_ch: u8) -> impl Into<Element<'a, Message>> {
+fn build_channel_menu_button<'a>(current_ch: u8) -> Button<'a, Message> {
     minimal_button(
         row![
             container(iced::widget::image(&*ICON_CHANNEL))
@@ -152,36 +154,48 @@ fn build_channel_menu_button<'a>(current_ch: u8) -> impl Into<Element<'a, Messag
     )
     .padding(4.0)
     .width(Length::Shrink)
-    .on_press(Message::ToggleMenu(Menu::Channel))
 }
 
-fn build_velocity_curve_button<'a>(curve: VelocityCurve) -> impl Into<Element<'a, Message>> {
+fn build_velocity_curve_button<'a>(curve: VelocityCurve) -> Button<'a, Message> {
     let icon = match curve {
         VelocityCurve::Light => &*ICON_CURVE_LIGHT,
         VelocityCurve::Normal => &*ICON_CURVE_NORMAL,
         VelocityCurve::Heavy => &*ICON_CURVE_HEAVY,
         VelocityCurve::Const => &*ICON_CURVE_CONST,
     };
-    let next_curve = match curve {
-        VelocityCurve::Light => VelocityCurve::Normal,
-        VelocityCurve::Normal => VelocityCurve::Heavy,
-        VelocityCurve::Heavy => VelocityCurve::Const,
-        VelocityCurve::Const => VelocityCurve::Light,
-    };
-    icon_button(icon).on_press(Message::SetVelocityCurve(next_curve))
+    icon_button(icon)
 }
 
-pub fn toolbar<'a>(active_ch: u8, curve: VelocityCurve) -> impl Into<Element<'a, Message>> {
+pub fn toolbar<'a>(
+    active_ch: u8,
+    curve: VelocityCurve,
+    const_velocity: u8,
+) -> impl Into<Element<'a, Message>> {
     responsive(move |size| {
         let mut items = vec![
             icon_button(&*ICON_RECONNECT)
                 .on_press(Message::ReconnectRequested)
                 .into(),
-            build_channel_menu_button(active_ch).into(),
+            build_channel_menu_button(active_ch)
+                .on_press(Message::ToggleMenu(Menu::Channel))
+                .into(),
             icon_text_button(&*ICON_RECONNECT, "Reconnect")
                 .on_press(Message::ReconnectRequested)
                 .into(),
-            build_velocity_curve_button(curve).into(),
+            build_velocity_curve_button(curve)
+                .on_press(Message::SetVelocityCurve(match curve {
+                    VelocityCurve::Light => VelocityCurve::Normal,
+                    VelocityCurve::Normal => VelocityCurve::Heavy,
+                    VelocityCurve::Heavy => VelocityCurve::Const,
+                    VelocityCurve::Const => VelocityCurve::Light,
+                }))
+                .into(),
+            minimal_button(text(format!("{const_velocity}")).size(12.0))
+                .width(Length::Shrink)
+                .on_press(Message::ToggleMenu(Menu::ConstantVelocity(format!(
+                    "{const_velocity}"
+                ))))
+                .into(),
             icon_button(&*ICON_ZOOM_IN).on_press(Message::ZoomIn).into(),
             icon_button(&*ICON_ZOOM_OUT)
                 .on_press(Message::ZoomOut)
@@ -194,7 +208,7 @@ pub fn toolbar<'a>(active_ch: u8, curve: VelocityCurve) -> impl Into<Element<'a,
     .height(24.0)
 }
 
-pub fn build_menu_ui<'a>(menu: Menu, active_ch: u8) -> impl Into<Element<'a, Message>> {
+pub fn build_menu_ui<'a>(menu: &Menu, active_ch: u8) -> impl Into<Element<'a, Message>> {
     match menu {
         Menu::Channel => {
             fn channel_button<'a>(label: String, ch: u8) -> iced::widget::Button<'a, Message> {
@@ -222,7 +236,7 @@ pub fn build_menu_ui<'a>(menu: Menu, active_ch: u8) -> impl Into<Element<'a, Mes
                 }))
                 .into()
             }));
-            let menu_button = build_channel_menu_button(active_ch).into();
+            let menu_button = build_channel_menu_button(active_ch);
 
             container(
                 column![
@@ -241,6 +255,28 @@ pub fn build_menu_ui<'a>(menu: Menu, active_ch: u8) -> impl Into<Element<'a, Mes
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_theme| container::Style::default().background(Color::BLACK.scale_alpha(0.8)))
+        }
+        Menu::ConstantVelocity(vel) => {
+            let popup = container(
+                row![
+                    text("Set constant velocity").size(12.0),
+                    text_input("0 - 128", vel)
+                        .on_input(Message::InputVelocityValue)
+                        .size(12.0)
+                        .width(34.0),
+                    button("Apply")
+                        .padding([4.0, 8.0])
+                        .on_press(Message::SetVelocityValue(vel.clone()))
+                ]
+                .align_y(Vertical::Center)
+                .spacing(8.0),
+            )
+            .padding([4.0, 8.0])
+            .style(container::bordered_box);
+
+            center(popup).style(|_theme| {
+                container::Style::default().background(Color::BLACK.scale_alpha(0.8))
+            })
         }
     }
 }
