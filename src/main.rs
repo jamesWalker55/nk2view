@@ -5,13 +5,15 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use iced::alignment::Horizontal;
+use iced::futures::channel::mpsc;
 use iced::futures::channel::mpsc::UnboundedSender;
+use iced::futures::{SinkExt, StreamExt};
 use iced::widget::canvas::Canvas;
 use iced::widget::{button, center, column, container, opaque, row, stack, text};
 use iced::{Alignment, Border, Color, Element, Length, Shadow, Task, alignment};
 
-use iced::futures::channel::mpsc;
-use iced::futures::{SinkExt, StreamExt};
+use tracing::{Level, info, trace, warn};
+use tracing_subscriber::FmtSubscriber;
 
 use crate::nk2::eventloop::{KBAction, KBEvent, spawn_event_thread};
 use crate::nk2::msg::dump_scene_request;
@@ -19,6 +21,13 @@ use crate::nk2::scene::Scene;
 use crate::widgets::keyboard::KeyboardProgram;
 
 pub fn main() -> iced::Result {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::TRACE)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    info!("starting app");
+
     iced::application(boot, update, view)
         .subscription(subscription)
         .antialiasing(true)
@@ -99,16 +108,20 @@ enum Message {
 }
 
 fn boot() -> (Option<App>, Task<Message>) {
+    trace!("app boot");
     (None, Task::none())
+
 }
 
 fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
+    trace!("app update {msg:?}");
     let Some(app) = app else {
         // app not yet initialized
         if let Message::Initialized { cmd_tx } = msg {
             let new_state = DisconnectedState {
                 message: "just started".into(),
             };
+            info!("state transition None -> Disconnected");
             *app = Some(App {
                 cmd_tx,
                 state: State::Disconnected(new_state),
@@ -138,6 +151,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                 .abortable();
 
                 // transition state
+                info!("state transition Disconnected -> FetchingScene");
                 app.state = State::FetchingScene {
                     _timeout_handle: handle.abort_on_drop(),
                 };
@@ -148,13 +162,14 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                 state.message = text;
             }
             _ => {
-                println!("got `{msg:?}` while disconnected?!");
+                warn!("got `{msg:?}` while disconnected?!");
             }
         },
 
         // established connection, get some initial data
         State::FetchingScene { .. } => match msg {
             Message::KBEvent(KBEvent::SceneDump(scene)) => {
+                info!("state transition FetchingScene -> Connected");
                 app.state = State::Connected(ConnectedState {
                     scene,
                     pressed_keys: [false; _],
@@ -162,21 +177,24 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                 })
             }
             Message::FetchTimeout => {
+                info!("state transition FetchingScene -> Disconnected (timeout)");
                 app.state = State::Disconnected(DisconnectedState {
                     message: "fetch timed out".into(),
                 });
             }
             Message::KBEvent(KBEvent::ConnectionLost(text)) => {
+                info!("state transition FetchingScene -> Disconnected (connection lost)");
                 app.state = State::Disconnected(DisconnectedState { message: text });
             }
             _ => {
-                println!("got `{msg:?}` while disconnected?!");
+                warn!("got `{msg:?}` while fetching?!");
             }
         },
 
         // connected to keyboard
         State::Connected(ref mut state) => match msg {
             Message::KBEvent(KBEvent::ConnectionLost(text)) => {
+                info!("state transition Disconnected -> Connected");
                 app.state = State::Disconnected(DisconnectedState { message: text });
             }
             Message::KBEvent(KBEvent::NoteOn(note)) => {
@@ -212,7 +230,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                 }
             },
             Message::RootNoteChanged(new_root) => {
-                println!("Root note changed to: {}", new_root);
+                info!("Root note changed to: {}", new_root);
                 state.scene.transpose = new_root + 4; // middle C is 60 in MIDI, but 64 in korg
 
                 let req =
@@ -264,6 +282,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
 }
 
 fn view(app: &Option<App>) -> Element<'_, Message> {
+    trace!("app view");
     // handle `None` state
     let Some(app) = app else {
         return container(text("Initializing...").align_x(alignment::Alignment::Center))
@@ -335,6 +354,7 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
 }
 
 fn subscription(_: &Option<App>) -> iced::Subscription<Message> {
+    trace!("app subscription");
     iced::Subscription::run(|| {
         iced::stream::channel(100, |mut output: mpsc::Sender<Message>| async move {
             let (cmd_tx, mut event_rx) = spawn_event_thread();

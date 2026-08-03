@@ -3,6 +3,7 @@ use std::time::Duration;
 use iced::futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use midi_control::MidiMessage;
 use smol::future::FutureExt as _;
+use tracing::{Instrument as _, debug, error, info, trace};
 
 use crate::nk2::{
     connection::{create_input_connection, create_output_connection},
@@ -74,41 +75,48 @@ pub fn spawn_event_thread() -> (UnboundedSender<KBAction>, UnboundedReceiver<KBE
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded::<KBAction>();
 
     std::thread::spawn(move || {
-        smol::block_on(async {
-            // run forever until main thread drops the receiver
-            loop {
-                match run_session(&evt_tx, &mut cmd_rx).await {
-                    Err(SessionError::MainThreadDropped) => {
-                        // The main application closed the receiver channel, stop the thread
-                        break;
-                    }
-
-                    // return Ok(()) to indicate a user-requested refresh
-                    Ok(_) => {
-                        let evt = KBEvent::ConnectionLost("user-triggered refresh".into());
-                        if evt_tx.unbounded_send(evt).is_err() {
-                            // main thread dropped the receiver, quit this thread
+        smol::block_on(
+            async {
+                // run forever until main thread drops the receiver
+                trace!("thread created");
+                loop {
+                    match run_session(&evt_tx, &mut cmd_rx).await {
+                        Err(SessionError::MainThreadDropped) => {
+                            // The main application closed the receiver channel, stop the thread
+                            debug!("main thread dropped");
                             break;
                         }
 
-                        continue;
-                    }
+                        // return Ok(()) to indicate a user-requested refresh
+                        Ok(_) => {
+                            debug!("user triggered refresh");
+                            let evt = KBEvent::ConnectionLost("user-triggered refresh".into());
+                            if evt_tx.unbounded_send(evt).is_err() {
+                                // main thread dropped the receiver, quit this thread
+                                break;
+                            }
 
-                    Err(SessionError::ConnectionLost(err_msg)) => {
-                        // keyboard disconnected / failed to connect
-                        // emit error and retry
-                        let evt = KBEvent::ConnectionLost(err_msg);
-                        if evt_tx.unbounded_send(evt).is_err() {
-                            // main thread dropped the receiver, quit this thread
-                            break;
+                            continue;
                         }
 
-                        // wait a bit before trying again
-                        smol::Timer::after(RETRY_DURATION).await;
+                        Err(SessionError::ConnectionLost(err_msg)) => {
+                            // keyboard disconnected / failed to connect
+                            // emit error and retry
+                            debug!("keyboard disconnected");
+                            let evt = KBEvent::ConnectionLost(err_msg);
+                            if evt_tx.unbounded_send(evt).is_err() {
+                                // main thread dropped the receiver, quit this thread
+                                break;
+                            }
+
+                            // wait a bit before trying again
+                            smol::Timer::after(RETRY_DURATION).await;
+                        }
                     }
                 }
             }
-        });
+            .instrument(tracing::info_span!("midi_worker")),
+        );
     });
 
     (cmd_tx, evt_rx)
@@ -135,6 +143,7 @@ async fn run_session(
 
     // create MIDI input, forwarding events into this scope
     // keep `_midi_in` alive to keep connection alive
+    debug!("creating input connection");
     let _midi_in = create_input_connection(
         move |_stamp, message, tx| {
             let _ = tx.unbounded_send(MidiMessage::from(message));
@@ -144,10 +153,12 @@ async fn run_session(
     .map_err(|e| SessionError::ConnectionLost(e.to_string()))?;
 
     // create MIDI output
+    debug!("creating output connection");
     let mut midi_out =
         create_output_connection().map_err(|e| SessionError::ConnectionLost(e.to_string()))?;
 
     // emit success signal
+    debug!("emit success");
     simple_tx
         .unbounded_send(KBEvent::ConnectionEstablished)
         .map_err(|_| SessionError::MainThreadDropped)?;
@@ -179,13 +190,16 @@ async fn run_session(
         match rx_task.or(cmd_task).await {
             // receive keyboard event
             LoopAction::MidiIn(msg) => {
-                if let Some(evt) = KBEvent::from_midi_message(&msg)
-                    && simple_tx.unbounded_send(evt).is_err()
-                {
-                    return Err(SessionError::MainThreadDropped);
+                trace!("got raw midi message");
+                if let Some(evt) = KBEvent::from_midi_message(&msg) {
+                    debug!("send midi message {evt:?}");
+                    if simple_tx.unbounded_send(evt).is_err() {
+                        return Err(SessionError::MainThreadDropped);
+                    }
                 }
             }
             LoopAction::MidiWorkerDied => {
+                error!("midi worker died");
                 return Err(SessionError::ConnectionLost(
                     "MIDI worker ended unexpectedly".into(),
                 ));
@@ -193,6 +207,7 @@ async fn run_session(
 
             // send keyboard event
             LoopAction::PerformAction(KBAction::Send(msg)) => {
+                info!("send msg to keyboard");
                 let msg: Vec<u8> = msg.into();
                 midi_out
                     .send(&msg)
@@ -200,10 +215,12 @@ async fn run_session(
             }
             LoopAction::PerformAction(KBAction::Reconnect) => {
                 // manually trigger reconnect
+                info!("trigger reconnect");
                 return Ok(());
             }
             LoopAction::MainThreadDropped => {
                 // If the main thread drops the sender, it means the application is likely shutting down.
+                info!("main thread dropped");
                 return Err(SessionError::MainThreadDropped);
             }
         }

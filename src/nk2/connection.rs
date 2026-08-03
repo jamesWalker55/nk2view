@@ -55,7 +55,7 @@ pub fn create_output_connection() -> Result<midir::MidiOutputConnection, Connect
         output
             .port_name(port)
             .map(|port_name| {
-                dbg!(&port_name) == NANOKEY2_OUTPUT_NAME || port_name == NANOKEY2_OUTPUT_NAME_2
+                &port_name == NANOKEY2_OUTPUT_NAME || port_name == NANOKEY2_OUTPUT_NAME_2
             })
             .unwrap_or(false)
     }) else {
