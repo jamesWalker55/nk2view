@@ -219,9 +219,6 @@ pub fn toolbar<'a>(
                 .on_press(Message::ReconnectRequested)
                 .into(),
             build_channel_menu_button(active_ch).into(),
-            icon_text_button(&*ICON_RECONNECT, "Reconnect")
-                .on_press(Message::ReconnectRequested)
-                .into(),
             build_velocity_curve_buttons(curve, const_velocity).into(),
             icon_button(&*ICON_ZOOM_IN).on_press(Message::ZoomIn).into(),
             icon_button(&*ICON_ZOOM_OUT)
