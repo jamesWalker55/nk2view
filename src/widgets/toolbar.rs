@@ -58,19 +58,16 @@ fn minimal_button<'a>(
 
 fn icon_button<'a>(
     handle: impl Into<iced::widget::image::Handle>,
-    msg: Message,
 ) -> iced::widget::Button<'a, Message> {
     minimal_button(
         container(iced::widget::image(handle))
             .center_x(24.0)
             .center_y(24.0),
     )
-    .on_press(msg)
 }
 
 fn icon_button_menu<'a>(
     handle: impl Into<iced::widget::image::Handle>,
-    msg: Message,
 ) -> iced::widget::Button<'a, Message> {
     minimal_button(
         row![
@@ -86,13 +83,11 @@ fn icon_button_menu<'a>(
     )
     .padding(4.0)
     .width(Length::Shrink)
-    .on_press(msg)
 }
 
 fn icon_text_button<'a>(
     handle: impl Into<iced::widget::image::Handle>,
     content: impl IntoFragment<'a>,
-    msg: Message,
 ) -> iced::widget::Button<'a, Message> {
     minimal_button(
         container(
@@ -114,7 +109,6 @@ fn icon_text_button<'a>(
         bottom: 0.0,
         left: 0.0, // no left padding because icon is already padded
     })
-    .on_press(msg)
 }
 
 macro_rules! icon {
@@ -138,13 +132,23 @@ icon!(ICON_CARET_DOWN, "fluent--caret-down-16-regular_CROP.png");
 pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
     responsive(|size| {
         let mut items = vec![
-            icon_button(&*ICON_RECONNECT, Message::ReconnectRequested).into(),
-            icon_button_menu(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
-            icon_text_button(&*ICON_RECONNECT, "Reconnect", Message::ReconnectRequested).into(),
-            icon_button(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
-            icon_button(&*ICON_ZOOM_IN, Message::ZoomIn).into(),
-            icon_button(&*ICON_ZOOM_OUT, Message::ZoomOut).into(),
-            icon_button(&*ICON_SAVE, Message::SaveScene).into(),
+            icon_button(&*ICON_RECONNECT)
+                .on_press(Message::ReconnectRequested)
+                .into(),
+            icon_button_menu(&*ICON_CHANNEL)
+                .on_press(Message::ReconnectRequested)
+                .into(),
+            icon_text_button(&*ICON_RECONNECT, "Reconnect")
+                .on_press(Message::ReconnectRequested)
+                .into(),
+            icon_button(&*ICON_CHANNEL)
+                // disabled button
+                .into(),
+            icon_button(&*ICON_ZOOM_IN).on_press(Message::ZoomIn).into(),
+            icon_button(&*ICON_ZOOM_OUT)
+                .on_press(Message::ZoomOut)
+                .into(),
+            icon_button(&*ICON_SAVE).on_press(Message::SaveScene).into(),
         ];
         row(items).width(Length::Fill).height(Length::Fill).into()
     })
