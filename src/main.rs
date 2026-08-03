@@ -22,7 +22,7 @@ pub fn main() -> iced::Result {
     iced::application(boot, update, view)
         .subscription(subscription)
         .antialiasing(true)
-        .title("Live MIDI Keyboard Visualizer")
+        .title("nk2view")
         .window_size([364.0, 90.0])
         .run()
 }
