@@ -135,6 +135,7 @@ icon!(ICON_CURVE_LIGHT, "line-high.png");
 icon!(ICON_CURVE_NORMAL, "line-straight.png");
 icon!(ICON_CURVE_HEAVY, "line-low.png");
 icon!(ICON_CURVE_CONST, "fluent--line-horizontal-1-16-regular.png");
+icon!(ICON_CONFIG, "fluent--settings-16-regular.png");
 
 fn build_channel_menu_button<'a>(current_ch: u8) -> Button<'a, Message> {
     minimal_button(
@@ -220,6 +221,14 @@ pub fn toolbar<'a>(
                 .into(),
             build_channel_menu_button(active_ch).into(),
             build_velocity_curve_buttons(curve, const_velocity).into(),
+            Space::new().width(Length::Fill).into(),
+            icon_text_button(&*ICON_CONFIG, "Sus")
+                .on_press(Message::ToggleMenu(Menu::ConfigSustain))
+                .into(),
+            icon_text_button(&*ICON_CONFIG, "Mod")
+                .on_press(Message::ToggleMenu(Menu::ConfigMod))
+                .into(),
+            Space::new().width(Length::Fill).into(),
             icon_button(&*ICON_ZOOM_IN).on_press(Message::ZoomIn).into(),
             icon_button(&*ICON_ZOOM_OUT)
                 .on_press(Message::ZoomOut)
@@ -302,5 +311,6 @@ pub fn build_menu_ui<'a>(menu: &Menu, active_ch: u8) -> impl Into<Element<'a, Me
                 container::Style::default().background(Color::BLACK.scale_alpha(0.8))
             })
         }
+        _ => todo!(),
     }
 }

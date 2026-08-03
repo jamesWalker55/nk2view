@@ -82,6 +82,8 @@ enum State {
 pub enum Menu {
     Channel,
     ConstantVelocity(String),
+    ConfigSustain,
+    ConfigMod,
 }
 
 #[derive(Debug)]
