@@ -2,7 +2,7 @@
 
 [![Demonstration](https://github.com/jamesWalker55/nk2view/raw/refs/heads/main/docs/nk2view_Ab3u8I0yRS.jpg)](https://github.com/jamesWalker55/nk2view/raw/refs/heads/main/docs/nk2view_Ab3u8I0yRS.mp4)
 
-A utility tool to edit parameters on the Korg nanoKEY2 keyboard.
+A utility tool to edit parameters on the Korg nanoKEY2 keyboard. Highly inspired by REAPER's virtual keyboard window.
 
 Only tested on **Windows 11**. This tool is basically useless on Windows 10 since Windows 10 doesn't have the new MIDI service which allows multi-client MIDI.
 
@@ -10,7 +10,7 @@ Only tested on **Windows 11**. This tool is basically useless on Windows 10 sinc
 
 **Not complete.**
 
-The Sustain + Modulation buttons are not implemented. Right now clicking on those button just crashes the program with a `todo!()` call.
+The Sustain + Modulation buttons are not implemented. Right now clicking on those button just crashes the program with a `todo!()` call. I personally never change these parameters so this will probably never get implemented.
 
 Everything else is implemented and working, including:
 
