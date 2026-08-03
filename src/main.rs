@@ -57,13 +57,13 @@ enum Message {
     Initialized {
         cmd_tx: UnboundedSender<KBAction>,
     },
-    KBEvent(KBEvent),
-    /// Emitted when the user clicks a key
-    RootNoteChanged(u8),
-    /// Emitted when the user clicks the refresh button
-    ReconnectRequested,
     /// Emitted if the 'fetching' state doesn't get a response from keyboard within some time
     FetchTimeout,
+    KBEvent(KBEvent),
+    /// A key is clicked
+    RootNoteChanged(u8),
+    /// Refresh button pressed
+    ReconnectRequested,
 }
 
 fn boot() -> (Option<App>, Task<Message>) {
@@ -236,84 +236,10 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
         return text("disconnected").into();
     }
 
-    fn my_button<'a>(
-        content: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
-    ) -> iced::widget::Button<'a, Message, iced::Theme, iced::Renderer> {
-        use iced::widget::button::Style;
-        button(content)
-            .padding(0.0)
-            .height(24.0)
-            .width(24.0)
-            .clip(true)
-            .style(|_theme, status| {
-                let border = Border {
-                    color: Color::TRANSPARENT,
-                    width: 0.0,
-                    radius: 0.0.into(),
-                };
-                let shadow = Shadow::default();
-                match status {
-                    button::Status::Active => Style {
-                        background: None,
-                        text_color: Color::BLACK,
-                        border,
-                        shadow,
-                        snap: true,
-                    },
-                    button::Status::Hovered => Style {
-                        background: Some(iced::Background::Color(Color::BLACK.scale_alpha(0.1))),
-                        text_color: Color::BLACK,
-                        border,
-                        shadow,
-                        snap: true,
-                    },
-                    button::Status::Pressed => Style {
-                        background: Some(iced::Background::Color(Color::BLACK.scale_alpha(0.3))),
-                        text_color: Color::BLACK,
-                        border,
-                        shadow,
-                        snap: true,
-                    },
-                    button::Status::Disabled => Style {
-                        background: Some(iced::Background::Color(Color::BLACK.scale_alpha(0.1))),
-                        text_color: Color::BLACK.scale_alpha(0.7),
-                        border,
-                        shadow,
-                        snap: true,
-                    },
-                }
-            })
-    }
-
     container(
         column![
             canvas.height(Length::Fill),
-            row![
-                my_button("reconnect")
-                    .width(Length::Fill)
-                    .on_press(Message::ReconnectRequested),
-                my_button("a").on_press(Message::ReconnectRequested),
-                my_button("b").on_press(Message::ReconnectRequested),
-                my_button(
-                    text("c")
-                        .align_x(Alignment::Center)
-                        .align_y(Alignment::Center)
-                )
-                .on_press(Message::ReconnectRequested),
-                my_button(
-                    container(
-                        iced::widget::image(r"C:\Users\jam\Downloads\svgs\at-icons--file.png")
-                            .width(16.0)
-                            .height(16.0)
-                            .expand(false)
-                    )
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill)
-                )
-                .on_press(Message::ReconnectRequested),
-            ],
+            widgets::toolbar::toolbar().into(),
         ]
         .align_x(alignment::Alignment::Center),
     )
