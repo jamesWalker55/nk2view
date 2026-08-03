@@ -5,6 +5,7 @@ use iced::widget::text::IntoFragment;
 use iced::widget::{Space, button, column, container, responsive, row, space, text};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Pixels, Shadow, Task, alignment};
 
+use crate::nk2::scene::VelocityCurve;
 use crate::{ConnectedState, Menu, Message};
 
 fn minimal_button<'a>(
@@ -128,6 +129,10 @@ icon!(ICON_SAVE, "fluent--save-16-regular.png");
 icon!(ICON_ZOOM_IN, "fluent--zoom-in-16-regular.png");
 icon!(ICON_ZOOM_OUT, "fluent--zoom-out-16-regular.png");
 icon!(ICON_CARET_DOWN, "fluent--caret-down-16-regular_CROP.png");
+icon!(ICON_CURVE_LIGHT, "line-high.png");
+icon!(ICON_CURVE_NORMAL, "line-straight.png");
+icon!(ICON_CURVE_HEAVY, "line-low.png");
+icon!(ICON_CURVE_CONST, "fluent--line-horizontal-1-16-regular.png");
 
 fn build_channel_menu_button<'a>(current_ch: u8) -> impl Into<Element<'a, Message>> {
     minimal_button(
@@ -150,7 +155,23 @@ fn build_channel_menu_button<'a>(current_ch: u8) -> impl Into<Element<'a, Messag
     .on_press(Message::ToggleMenu(Menu::Channel))
 }
 
-pub fn toolbar<'a>(active_ch: u8) -> impl Into<Element<'a, Message>> {
+fn build_velocity_curve_button<'a>(curve: VelocityCurve) -> impl Into<Element<'a, Message>> {
+    let icon = match curve {
+        VelocityCurve::Light => &*ICON_CURVE_LIGHT,
+        VelocityCurve::Normal => &*ICON_CURVE_NORMAL,
+        VelocityCurve::Heavy => &*ICON_CURVE_HEAVY,
+        VelocityCurve::Const => &*ICON_CURVE_CONST,
+    };
+    let next_curve = match curve {
+        VelocityCurve::Light => VelocityCurve::Normal,
+        VelocityCurve::Normal => VelocityCurve::Heavy,
+        VelocityCurve::Heavy => VelocityCurve::Const,
+        VelocityCurve::Const => VelocityCurve::Light,
+    };
+    icon_button(icon).on_press(Message::SetVelocityCurve(next_curve))
+}
+
+pub fn toolbar<'a>(active_ch: u8, curve: VelocityCurve) -> impl Into<Element<'a, Message>> {
     responsive(move |size| {
         let mut items = vec![
             icon_button(&*ICON_RECONNECT)
@@ -160,9 +181,7 @@ pub fn toolbar<'a>(active_ch: u8) -> impl Into<Element<'a, Message>> {
             icon_text_button(&*ICON_RECONNECT, "Reconnect")
                 .on_press(Message::ReconnectRequested)
                 .into(),
-            icon_button(&*ICON_CHANNEL)
-                // disabled button
-                .into(),
+            build_velocity_curve_button(curve).into(),
             icon_button(&*ICON_ZOOM_IN).on_press(Message::ZoomIn).into(),
             icon_button(&*ICON_ZOOM_OUT)
                 .on_press(Message::ZoomOut)

@@ -17,7 +17,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use crate::nk2::eventloop::{KBAction, KBEvent, spawn_event_thread};
 use crate::nk2::msg::dump_scene_request;
-use crate::nk2::scene::Scene;
+use crate::nk2::scene::{Scene, VelocityCurve};
 use crate::widgets::keyboard::KeyboardProgram;
 use crate::widgets::toolbar::build_menu_ui;
 
@@ -113,6 +113,7 @@ enum Message {
     ZoomIn,
     ZoomOut,
     SetChannel(u8),
+    SetVelocityCurve(VelocityCurve),
     ToggleMenu(Menu),
 }
 
@@ -289,6 +290,16 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                     .unbounded_send(KBAction::Send(req))
                     .expect("TODO: midi worker terminated unexpectedly");
             }
+            Message::SetVelocityCurve(curve) => {
+                info!("set curve to {:?}", curve);
+                state.scene.velocity_curve = curve;
+
+                let req =
+                    crate::nk2::msg::load_scene_request(state.scene.midi_channel, &state.scene);
+                app.cmd_tx
+                    .unbounded_send(KBAction::Send(req))
+                    .expect("TODO: midi worker terminated unexpectedly");
+            }
             Message::ToggleMenu(menu) => {
                 let is_same_menu = state.active_menu.map(|x| x == menu).unwrap_or(false);
                 if is_same_menu {
@@ -341,11 +352,11 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
         container(
             column![
                 canvas.width(Length::Fill).height(Length::Fill),
-                widgets::toolbar::toolbar(if let State::Connected(state) = &app.state {
-                    state.scene.midi_channel
+                if let State::Connected(state) = &app.state {
+                    widgets::toolbar::toolbar(state.scene.midi_channel, state.scene.velocity_curve)
                 } else {
-                    0
-                })
+                    widgets::toolbar::toolbar(0, VelocityCurve::Normal)
+                }
                 .into(),
             ]
             .align_x(alignment::Alignment::Center),
