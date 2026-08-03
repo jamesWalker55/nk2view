@@ -19,6 +19,7 @@ use crate::nk2::eventloop::{KBAction, KBEvent, spawn_event_thread};
 use crate::nk2::msg::dump_scene_request;
 use crate::nk2::scene::Scene;
 use crate::widgets::keyboard::KeyboardProgram;
+use crate::widgets::toolbar::build_menu_ui;
 
 pub fn main() -> iced::Result {
     let subscriber = FmtSubscriber::builder()
@@ -77,11 +78,17 @@ enum State {
     FetchingScene { _timeout_handle: iced::task::Handle },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Menu {
+    Channel,
+}
+
 #[derive(Debug)]
 struct ConnectedState {
     scene: Scene,
     pressed_keys: [bool; 128],
     popup: Option<String>,
+    active_menu: Option<Menu>,
 }
 
 #[derive(Debug)]
@@ -105,12 +112,13 @@ enum Message {
     SaveScene,
     ZoomIn,
     ZoomOut,
+    SetChannel(u8),
+    ToggleMenu(Menu),
 }
 
 fn boot() -> (Option<App>, Task<Message>) {
     trace!("app boot");
     (None, Task::none())
-
 }
 
 fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
@@ -174,6 +182,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                     scene,
                     pressed_keys: [false; _],
                     popup: None,
+                    active_menu: None,
                 })
             }
             Message::FetchTimeout => {
@@ -268,6 +277,26 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                     .find(|x| *x < app.keyboard_size)
                     .unwrap_or(*KEYBOARD_ZOOM_LEVELS.first().unwrap());
             }
+            Message::SetChannel(ch) => {
+                state.active_menu = None;
+
+                info!("set channel to {}", ch);
+                let old_ch = state.scene.midi_channel;
+                state.scene.midi_channel = ch;
+
+                let req = crate::nk2::msg::load_scene_request(old_ch, &state.scene);
+                app.cmd_tx
+                    .unbounded_send(KBAction::Send(req))
+                    .expect("TODO: midi worker terminated unexpectedly");
+            }
+            Message::ToggleMenu(menu) => {
+                let is_same_menu = state.active_menu.map(|x| x == menu).unwrap_or(false);
+                if is_same_menu {
+                    state.active_menu = None;
+                } else {
+                    state.active_menu = Some(menu);
+                }
+            }
             Message::KBEvent(KBEvent::ConnectionEstablished) => {
                 unreachable!("should not receive ConnectionEstablished message")
             }
@@ -291,65 +320,88 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
             .into();
     };
 
-    // the keyboard display
-    let canvas = Canvas::new(KeyboardProgram {
-        note_width: app.keyboard_size,
-        pressed_keys: match app.state {
-            State::Connected(ref state) => &state.pressed_keys,
-            State::Disconnected(_) => &const { [false; _] },
-            State::FetchingScene { .. } => &const { [false; _] },
-        },
-        root_note: match app.state {
-            State::Connected(ref state) => state.scene.transpose - 4,
-            State::Disconnected(_) => 60,
-            State::FetchingScene { .. } => 60,
-        },
-        on_note_clicked: Box::new(Message::RootNoteChanged),
-    });
+    // the main UI
+    let base = {
+        // the keyboard display
+        let canvas = Canvas::new(KeyboardProgram {
+            note_width: app.keyboard_size,
+            pressed_keys: match app.state {
+                State::Connected(ref state) => &state.pressed_keys,
+                State::Disconnected(_) => &const { [false; _] },
+                State::FetchingScene { .. } => &const { [false; _] },
+            },
+            root_note: match app.state {
+                State::Connected(ref state) => state.scene.transpose - 4,
+                State::Disconnected(_) => 60,
+                State::FetchingScene { .. } => 60,
+            },
+            on_note_clicked: Box::new(Message::RootNoteChanged),
+        });
 
-    let base = container(
-        column![
-            canvas.width(Length::Fill).height(Length::Fill),
-            widgets::toolbar::toolbar().into(),
-        ]
-        .align_x(alignment::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-    let popup: Option<(Cow<'static, str>, bool)> = match &app.state {
-        State::Connected(state) => state
-            .popup
-            .as_ref()
-            .map(|msg| (Cow::from(msg.clone()), true)),
-        State::Disconnected(..) => Some((Cow::from("Connecting to keyboard..."), false)),
-        State::FetchingScene { .. } => Some((Cow::from("Fetching scene data..."), false)),
+        container(
+            column![
+                canvas.width(Length::Fill).height(Length::Fill),
+                widgets::toolbar::toolbar(if let State::Connected(state) = &app.state {
+                    state.scene.midi_channel
+                } else {
+                    0
+                })
+                .into(),
+            ]
+            .align_x(alignment::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
     };
 
-    if let Some((popup_msg, popup_dismissable)) = popup {
-        let popup = container(
-            (if popup_dismissable {
-                column![
-                    text(popup_msg),
-                    button("Close")
-                        .padding([4.0, 8.0])
-                        .on_press(Message::DismissPopup)
-                ]
-                .align_x(Horizontal::Center)
-            } else {
-                column![text(popup_msg),].align_x(Horizontal::Center)
-            })
-            .spacing(8.0),
-        )
-        .padding([4.0, 8.0])
-        .style(container::bordered_box);
-
-        let overlay = center(popup)
-            .style(|_theme| container::Style::default().background(Color::BLACK.scale_alpha(0.8)));
-
-        stack![base, opaque(overlay)].into()
+    // build a menu if any
+    let menu_ui = if let State::Connected(state) = &app.state {
+        state
+            .active_menu
+            .map(|menu| build_menu_ui(menu, state.scene.midi_channel))
     } else {
-        base.into()
+        None
+    };
+
+    let popup_ui = {
+        let info: Option<(Cow<'static, str>, bool)> = match &app.state {
+            State::Connected(state) => state
+                .popup
+                .as_ref()
+                .map(|msg| (Cow::from(msg.clone()), true)),
+            State::Disconnected(..) => Some((Cow::from("Connecting to keyboard..."), false)),
+            State::FetchingScene { .. } => Some((Cow::from("Fetching scene data..."), false)),
+        };
+
+        info.map(|(msg, is_dismissable)| {
+            let popup = container(
+                (if is_dismissable {
+                    column![
+                        text(msg),
+                        button("Close")
+                            .padding([4.0, 8.0])
+                            .on_press(Message::DismissPopup)
+                    ]
+                    .align_x(Horizontal::Center)
+                } else {
+                    column![text(msg),].align_x(Horizontal::Center)
+                })
+                .spacing(8.0),
+            )
+            .padding([4.0, 8.0])
+            .style(container::bordered_box);
+
+            center(popup).style(|_theme| {
+                container::Style::default().background(Color::BLACK.scale_alpha(0.8))
+            })
+        })
+    };
+
+    match (menu_ui, popup_ui) {
+        (Some(menu_ui), Some(popup_ui)) => stack![base, opaque(menu_ui), opaque(popup_ui)].into(),
+        (Some(menu_ui), None) => stack![base, opaque(menu_ui)].into(),
+        (None, Some(popup_ui)) => stack![base, opaque(popup_ui)].into(),
+        (None, None) => base.into(),
     }
 }
 

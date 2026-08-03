@@ -1,11 +1,11 @@
 // use std::sync::LazyLock;
 
-use iced::alignment::Vertical;
+use iced::alignment::{Horizontal, Vertical};
 use iced::widget::text::IntoFragment;
-use iced::widget::{button, column, container, responsive, row, text};
+use iced::widget::{Space, button, column, container, responsive, row, space, text};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Pixels, Shadow, Task, alignment};
 
-use crate::Message;
+use crate::{ConnectedState, Menu, Message};
 
 fn minimal_button<'a>(
     content: impl Into<Element<'a, Message, iced::Theme, iced::Renderer>>,
@@ -129,15 +129,34 @@ icon!(ICON_ZOOM_IN, "fluent--zoom-in-16-regular.png");
 icon!(ICON_ZOOM_OUT, "fluent--zoom-out-16-regular.png");
 icon!(ICON_CARET_DOWN, "fluent--caret-down-16-regular_CROP.png");
 
-pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
-    responsive(|size| {
+fn build_channel_menu_button<'a>(current_ch: u8) -> impl Into<Element<'a, Message>> {
+    minimal_button(
+        row![
+            container(iced::widget::image(&*ICON_CHANNEL))
+                .center_x(16.0)
+                .center_y(16.0),
+            container(text(format!("{}", current_ch + 1)).size(12.0))
+                .center_x(16.0)
+                .center_y(16.0),
+            container(iced::widget::image(&*ICON_CARET_DOWN))
+                .center_x(8.0)
+                .center_y(6.0),
+        ]
+        .spacing(2.0)
+        .align_y(Vertical::Center),
+    )
+    .padding(4.0)
+    .width(Length::Shrink)
+    .on_press(Message::ToggleMenu(Menu::Channel))
+}
+
+pub fn toolbar<'a>(active_ch: u8) -> impl Into<Element<'a, Message>> {
+    responsive(move |size| {
         let mut items = vec![
             icon_button(&*ICON_RECONNECT)
                 .on_press(Message::ReconnectRequested)
                 .into(),
-            icon_button_menu(&*ICON_CHANNEL)
-                .on_press(Message::ReconnectRequested)
-                .into(),
+            build_channel_menu_button(active_ch).into(),
             icon_text_button(&*ICON_RECONNECT, "Reconnect")
                 .on_press(Message::ReconnectRequested)
                 .into(),
@@ -154,4 +173,55 @@ pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
     })
     .width(Length::Fill)
     .height(24.0)
+}
+
+pub fn build_menu_ui<'a>(menu: Menu, active_ch: u8) -> impl Into<Element<'a, Message>> {
+    match menu {
+        Menu::Channel => {
+            fn channel_button<'a>(label: String, ch: u8) -> iced::widget::Button<'a, Message> {
+                minimal_button(
+                    container(text(label).size(12.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(Message::SetChannel(ch))
+            }
+
+            let channel_buttons = column([8..16u8, 0..8u8].map(|range| {
+                row(range.map(|ch| {
+                    let btn = channel_button(format!("{}", ch + 1), ch);
+                    if ch == active_ch {
+                        container(btn)
+                            .style(|_| {
+                                container::Style::default()
+                                    .background(Color::from_rgb(0.27, 0.96, 0.35))
+                            })
+                            .into()
+                    } else {
+                        btn.into()
+                    }
+                }))
+                .into()
+            }));
+            let menu_button = build_channel_menu_button(active_ch).into();
+
+            container(
+                column![
+                    Space::new().height(Length::Fill),
+                    container(channel_buttons)
+                        .style(|_| { container::Style::default().background(Color::WHITE) }),
+                    row![
+                        Space::new().width(24.0),
+                        container(menu_button)
+                            .style(|_| { container::Style::default().background(Color::WHITE) }),
+                    ]
+                    .align_y(Vertical::Center),
+                ]
+                .align_x(Horizontal::Left),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme| container::Style::default().background(Color::BLACK.scale_alpha(0.8)))
+        }
+    }
 }
