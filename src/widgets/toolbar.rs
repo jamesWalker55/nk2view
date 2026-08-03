@@ -1,7 +1,9 @@
 // use std::sync::LazyLock;
 
+use iced::alignment::Vertical;
+use iced::widget::text::IntoFragment;
 use iced::widget::{button, column, container, responsive, row, text};
-use iced::{Alignment, Border, Color, Element, Length, Shadow, Task, alignment};
+use iced::{Alignment, Border, Color, Element, Length, Padding, Pixels, Shadow, Task, alignment};
 
 use crate::Message;
 
@@ -54,6 +56,46 @@ fn minimal_button<'a>(
         })
 }
 
+fn icon_button<'a>(
+    handle: impl Into<iced::widget::image::Handle>,
+    msg: Message,
+) -> iced::widget::Button<'a, Message> {
+    minimal_button(
+        container(iced::widget::image(handle))
+            .center_x(24.0)
+            .center_y(24.0),
+    )
+    .on_press(msg)
+}
+
+fn icon_text_button<'a>(
+    handle: impl Into<iced::widget::image::Handle>,
+    content: impl IntoFragment<'a>,
+    msg: Message,
+) -> iced::widget::Button<'a, Message> {
+    minimal_button(
+        container(
+            row![
+                container(iced::widget::image(handle))
+                    .center_x(24.0)
+                    .center_y(24.0),
+                text(content).size(12.0),
+            ]
+            .align_y(Vertical::Center),
+        )
+        .center_x(Length::Fill)
+        .center_y(Length::Fill),
+    )
+    .width(Length::Shrink)
+    .padding(Padding {
+        top: 0.0,
+        right: 6.0,
+        bottom: 0.0,
+        left: 0.0, // no left padding because icon is already padded
+    })
+    .on_press(msg)
+}
+
 macro_rules! icon {
     ($name:ident, $filename:literal) => {
         static $name: std::sync::LazyLock<iced::widget::image::Handle> =
@@ -72,33 +114,11 @@ icon!(ICON_SAVE, "fluent--save-16-regular.png");
 pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
     responsive(|size| {
         let mut items = vec![
-            minimal_button(
-                container(iced::widget::image(&*ICON_RECONNECT))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .on_press(Message::ReconnectRequested)
-            .into(),
-            minimal_button(
-                container(iced::widget::image(&*ICON_CHANNEL))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .on_press(Message::ReconnectRequested)
-            .into(),
-            minimal_button(
-                container(iced::widget::image(&*ICON_SAVE))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .on_press(Message::SaveScene)
-            .into(),
+            icon_button(&*ICON_RECONNECT, Message::ReconnectRequested).into(),
+            icon_button(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
+            icon_text_button(&*ICON_RECONNECT, "Reconnect", Message::ReconnectRequested).into(),
+            icon_button(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
+            icon_button(&*ICON_SAVE, Message::SaveScene).into(),
         ];
         row(items).width(Length::Fill).height(Length::Fill).into()
     })
