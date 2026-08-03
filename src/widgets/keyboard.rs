@@ -1,5 +1,6 @@
 use iced::widget::Action;
-use iced::widget::canvas::{self, Frame, Path, Program};
+use iced::widget::canvas::{self, Frame, Path, Program, Text};
+use iced::widget::text::LineHeight;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 
 const WHITE_ZOOM_LEVELS: [u8; 5] = [20, 24, 28, 34, 40];
@@ -44,6 +45,7 @@ const COLOR_PRESSED: Color = Color::from_rgb(0.4, 0.7, 1.0);
 const COLOR_BORDER: Color = Color::BLACK;
 const COLOR_BAR_BG: Color = Color::WHITE;
 const COLOR_BAR_HIGHLIGHT: Color = Color::from_rgb(1.0, 0.0, 0.0);
+const COLOR_TEXT: Color = Color::BLACK;
 
 const NUM_WHITE_KEYS: u8 = 75;
 const NUM_BLACK_KEYS: u8 = 53;
@@ -262,6 +264,29 @@ fn draw_keys(
             &Path::rectangle(key.rect.position(), key.rect.size()),
             color,
         );
+    }
+    // draw C1..C7 text
+    let rect_labels_height = (rect_keys.height * 0.4).round().min(20.0);
+    let rect_labels = Rectangle {
+        x: rect_keys.x,
+        y: rect_keys.y + rect_keys.height - rect_labels_height,
+        width: rect_keys.width,
+        height: rect_labels_height,
+    };
+    for i in 0..=10 {
+        let rect = white_key_rect(i * 7, sizes, origin, &rect_labels);
+        frame.fill_text(Text {
+            content: format!("C{}", (i as i8) - 1),
+            position: rect.center(),
+            max_width: rect.width,
+            color: COLOR_TEXT,
+            size: 10.0.into(),
+            line_height: LineHeight::default(),
+            font: Default::default(),
+            align_x: iced::widget::text::Alignment::Center,
+            align_y: iced::alignment::Vertical::Center,
+            shaping: iced::widget::text::Shaping::Basic,
+        });
     }
 }
 
