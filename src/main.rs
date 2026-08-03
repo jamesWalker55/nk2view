@@ -25,7 +25,7 @@ use crate::widgets::toolbar::build_menu_ui;
 
 pub fn main() -> iced::Result {
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::ERROR)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
