@@ -171,11 +171,21 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                 }
                 nk2::msg::Ack::LoadError(ch) => {
                     state.popup = Some(format!("Load Error (ch. {ch})"));
-                    println!("TODO: Ack::LoadError({ch})")
+                    println!("TODO: Ack::LoadError({ch})");
+
+                    let req = crate::nk2::msg::dump_scene_request(state.scene.midi_channel);
+                    app.cmd_tx
+                        .unbounded_send(KBAction::Send(req))
+                        .expect("TODO: midi worker terminated unexpectedly");
                 }
                 nk2::msg::Ack::WriteError(ch) => {
                     state.popup = Some(format!("Write Error (ch. {ch})"));
-                    println!("TODO: Ack::WriteError({ch})")
+                    println!("TODO: Ack::WriteError({ch})");
+
+                    let req = crate::nk2::msg::dump_scene_request(state.scene.midi_channel);
+                    app.cmd_tx
+                        .unbounded_send(KBAction::Send(req))
+                        .expect("TODO: midi worker terminated unexpectedly");
                 }
             },
             Message::RootNoteChanged(new_root) => {
@@ -184,7 +194,6 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
 
                 let req =
                     crate::nk2::msg::load_scene_request(state.scene.midi_channel, &state.scene);
-                println!("send load scene request: {req:?}");
                 app.cmd_tx
                     .unbounded_send(KBAction::Send(req))
                     .expect("TODO: midi worker terminated unexpectedly");
