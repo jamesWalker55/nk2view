@@ -12,7 +12,7 @@ use crate::nk2::{
 };
 
 /// How long to wait before establishing/retrying a new connection
-const RETRY_DURATION: Duration = Duration::from_millis(100);
+const RETRY_DURATION: Duration = Duration::from_millis(200);
 
 /// Limited subset of MIDI events from keyboard to client
 #[derive(Debug, Clone)]
