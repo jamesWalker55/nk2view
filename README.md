@@ -1,6 +1,6 @@
 # nk2view
 
-![](./docs/nk2view_Ab3u8I0yRS.mp4)
+[![Demonstration](https://github.com/jamesWalker55/nk2view/raw/refs/heads/main/docs/nk2view_Ab3u8I0yRS.jpg)](https://github.com/jamesWalker55/nk2view/raw/refs/heads/main/docs/nk2view_Ab3u8I0yRS.mp4)
 
 A utility tool to edit parameters on the Korg nanoKEY2 keyboard.
 
