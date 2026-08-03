@@ -23,7 +23,30 @@ pub fn main() -> iced::Result {
         .subscription(subscription)
         .antialiasing(true)
         .title("nk2view")
-        .window_size([364.0, 90.0])
+        .window(iced::window::Settings {
+            size: [364.0, 90.0].into(),
+            // maximized: (),
+            // fullscreen: (),
+            position: Default::default(),
+            min_size: Some([120.0, 60.0].into()), // 120.0 is windows default min size
+            max_size: None,
+            // visible: (),
+            // resizable: (),
+            // closeable: (),
+            // minimizable: (),
+            // decorations: (),
+            // transparent: (),
+            // blur: (),
+            // level: (),
+            // icon: (),
+            platform_specific: iced::window::settings::PlatformSpecific {
+                undecorated_shadow: true,
+                corner_preference: iced::window::settings::platform::CornerPreference::DoNotRound,
+                ..Default::default()
+            },
+            // exit_on_close_request: (),
+            ..Default::default()
+        })
         .run()
 }
 
