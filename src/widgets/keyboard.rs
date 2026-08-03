@@ -153,7 +153,8 @@ fn black_key_rect(idx: u8, sizes: &Sizes, origin: f32, bounds: &Rectangle) -> Re
             3 => sizes.white * 5.0 - sizes.black / 2.0,
             4 => sizes.white * 6.0 - sizes.black / 2.0 + sizes.fa_offset,
             _ => unreachable!(),
-        };
+        }
+        .round();
     Rectangle::new(
         Point::new(left_x, bounds.y),
         Size::new(sizes.black, (bounds.height * 0.6).round()),
