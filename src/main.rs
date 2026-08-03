@@ -53,7 +53,10 @@ pub fn main() -> iced::Result {
 struct App {
     cmd_tx: UnboundedSender<KBAction>,
     state: State,
+    keyboard_size: u8,
 }
+
+const KEYBOARD_ZOOM_LEVELS: [u8; 5] = [20, 24, 28, 34, 40];
 
 #[derive(Debug)]
 enum State {
@@ -91,6 +94,8 @@ enum Message {
     ReconnectRequested,
     DismissPopup,
     SaveScene,
+    ZoomIn,
+    ZoomOut,
 }
 
 fn boot() -> (Option<App>, Task<Message>) {
@@ -107,6 +112,7 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
             *app = Some(App {
                 cmd_tx,
                 state: State::Disconnected(new_state),
+                keyboard_size: KEYBOARD_ZOOM_LEVELS[0],
             })
         }
         return Task::none();
@@ -229,6 +235,21 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                     .unbounded_send(KBAction::Send(req))
                     .expect("TODO: midi worker terminated unexpectedly");
             }
+            Message::ZoomIn => {
+                app.keyboard_size = KEYBOARD_ZOOM_LEVELS
+                    .iter()
+                    .copied()
+                    .find(|x| *x > app.keyboard_size)
+                    .unwrap_or(*KEYBOARD_ZOOM_LEVELS.last().unwrap());
+            }
+            Message::ZoomOut => {
+                app.keyboard_size = KEYBOARD_ZOOM_LEVELS
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|x| *x < app.keyboard_size)
+                    .unwrap_or(*KEYBOARD_ZOOM_LEVELS.first().unwrap());
+            }
             Message::KBEvent(KBEvent::ConnectionEstablished) => {
                 unreachable!("should not receive ConnectionEstablished message")
             }
@@ -253,7 +274,7 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
 
     // the keyboard display
     let canvas = Canvas::new(KeyboardProgram {
-        note_width: 20,
+        note_width: app.keyboard_size,
         pressed_keys: match app.state {
             State::Connected(ref state) => &state.pressed_keys,
             State::Disconnected(_) => &const { [false; _] },

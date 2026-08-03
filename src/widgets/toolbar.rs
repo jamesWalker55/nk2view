@@ -110,6 +110,8 @@ macro_rules! icon {
 icon!(ICON_RECONNECT, "fluent--arrow-clockwise-16-regular.png");
 icon!(ICON_CHANNEL, "fluent--midi-16-regular.png");
 icon!(ICON_SAVE, "fluent--save-16-regular.png");
+icon!(ICON_ZOOM_IN, "fluent--zoom-in-16-regular.png");
+icon!(ICON_ZOOM_OUT, "fluent--zoom-out-16-regular.png");
 
 pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
     responsive(|size| {
@@ -118,6 +120,8 @@ pub fn toolbar<'a>() -> impl Into<Element<'a, Message>> {
             icon_button(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
             icon_text_button(&*ICON_RECONNECT, "Reconnect", Message::ReconnectRequested).into(),
             icon_button(&*ICON_CHANNEL, Message::ReconnectRequested).into(),
+            icon_button(&*ICON_ZOOM_IN, Message::ZoomIn).into(),
+            icon_button(&*ICON_ZOOM_OUT, Message::ZoomOut).into(),
             icon_button(&*ICON_SAVE, Message::SaveScene).into(),
         ];
         row(items).width(Length::Fill).height(Length::Fill).into()

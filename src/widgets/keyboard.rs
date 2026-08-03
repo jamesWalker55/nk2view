@@ -3,8 +3,6 @@ use iced::widget::canvas::{self, Frame, Path, Program, Text};
 use iced::widget::text::LineHeight;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme};
 
-const WHITE_ZOOM_LEVELS: [u8; 5] = [20, 24, 28, 34, 40];
-
 /// Amounts are in logical pixels
 #[derive(Debug)]
 struct Sizes {
