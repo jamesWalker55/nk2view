@@ -1,11 +1,13 @@
 mod nk2;
 mod widgets;
 
+use std::borrow::Cow;
 use std::time::Duration;
 
+use iced::alignment::Horizontal;
 use iced::futures::channel::mpsc::UnboundedSender;
 use iced::widget::canvas::Canvas;
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{button, center, column, container, opaque, row, stack, text};
 use iced::{Alignment, Border, Color, Element, Length, Shadow, Task, alignment};
 
 use iced::futures::channel::mpsc;
@@ -64,6 +66,8 @@ enum Message {
     RootNoteChanged(u8),
     /// Refresh button pressed
     ReconnectRequested,
+    /// Close popup button
+    DismissPopup,
 }
 
 fn boot() -> (Option<App>, Task<Message>) {
@@ -161,28 +165,18 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                 state.scene = scene;
             }
             Message::KBEvent(KBEvent::Ack(ack)) => match ack {
-                nk2::msg::Ack::LoadCompleted(ch) => {
-                    state.popup = Some(format!("Load Completed (ch. {ch})"));
-                    println!("TODO: Ack::LoadCompleted({ch})");
-                }
-                nk2::msg::Ack::WriteCompleted(ch) => {
-                    state.popup = Some(format!("Write Completed (ch. {ch})"));
-                    println!("TODO: Ack::WriteCompleted({ch})");
-                }
+                nk2::msg::Ack::LoadCompleted(_ch) => (),
+                nk2::msg::Ack::WriteCompleted(_ch) => (),
                 nk2::msg::Ack::LoadError(ch) => {
                     state.popup = Some(format!("Load Error (ch. {ch})"));
-                    println!("TODO: Ack::LoadError({ch})");
-
-                    let req = crate::nk2::msg::dump_scene_request(state.scene.midi_channel);
+                    let req = crate::nk2::msg::dump_scene_request(ch);
                     app.cmd_tx
                         .unbounded_send(KBAction::Send(req))
                         .expect("TODO: midi worker terminated unexpectedly");
                 }
                 nk2::msg::Ack::WriteError(ch) => {
                     state.popup = Some(format!("Write Error (ch. {ch})"));
-                    println!("TODO: Ack::WriteError({ch})");
-
-                    let req = crate::nk2::msg::dump_scene_request(state.scene.midi_channel);
+                    let req = crate::nk2::msg::dump_scene_request(ch);
                     app.cmd_tx
                         .unbounded_send(KBAction::Send(req))
                         .expect("TODO: midi worker terminated unexpectedly");
@@ -203,6 +197,9 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
                     .unbounded_send(KBAction::Reconnect)
                     .expect("TODO: midi worker terminated unexpectedly");
             }
+            Message::DismissPopup => {
+                state.popup = None;
+            }
             Message::KBEvent(KBEvent::ConnectionEstablished) => {
                 unreachable!("should not receive ConnectionEstablished message")
             }
@@ -217,13 +214,15 @@ fn update(app: &mut Option<App>, msg: Message) -> Task<Message> {
 }
 
 fn view(app: &Option<App>) -> Element<'_, Message> {
+    // handle `None` state
     let Some(app) = app else {
-        return container(text("initializing").align_x(alignment::Alignment::Center))
+        return container(text("Initializing...").align_x(alignment::Alignment::Center))
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
     };
 
+    // the keyboard display
     let canvas = Canvas::new(KeyboardProgram {
         note_width: 20,
         pressed_keys: match app.state {
@@ -237,24 +236,52 @@ fn view(app: &Option<App>) -> Element<'_, Message> {
             State::FetchingScene { .. } => 60,
         },
         on_note_clicked: Box::new(Message::RootNoteChanged),
-    })
-    .width(Length::Fill)
-    .height(Length::Fixed(150.0));
+    });
 
-    if matches!(app.state, State::Disconnected(_)) {
-        return text("disconnected").into();
-    }
-
-    container(
+    let base = container(
         column![
-            canvas.height(Length::Fill),
+            canvas.width(Length::Fill).height(Length::Fill),
             widgets::toolbar::toolbar().into(),
         ]
         .align_x(alignment::Alignment::Center),
     )
     .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    .height(Length::Fill);
+
+    let popup: Option<(Cow<'static, str>, bool)> = match &app.state {
+        State::Connected(state) => state
+            .popup
+            .as_ref()
+            .map(|msg| (Cow::from(msg.clone()), true)),
+        State::Disconnected(..) => Some((Cow::from("Connecting to keyboard..."), false)),
+        State::FetchingScene { .. } => Some((Cow::from("Fetching scene data..."), false)),
+    };
+
+    if let Some((popup_msg, popup_dismissable)) = popup {
+        let popup = container(
+            (if popup_dismissable {
+                column![
+                    text(popup_msg),
+                    button("Close")
+                        .padding([4.0, 8.0])
+                        .on_press(Message::DismissPopup)
+                ]
+                .align_x(Horizontal::Center)
+            } else {
+                column![text(popup_msg),].align_x(Horizontal::Center)
+            })
+            .spacing(8.0),
+        )
+        .padding([4.0, 8.0])
+        .style(container::bordered_box);
+
+        let overlay = center(popup)
+            .style(|_theme| container::Style::default().background(Color::BLACK.scale_alpha(0.8)));
+
+        stack![base, opaque(overlay)].into()
+    } else {
+        base.into()
+    }
 }
 
 fn subscription(_: &Option<App>) -> iced::Subscription<Message> {
