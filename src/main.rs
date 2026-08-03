@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 mod nk2;
 mod widgets;
 
